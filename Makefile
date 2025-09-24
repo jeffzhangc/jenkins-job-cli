@@ -9,7 +9,7 @@ clean:
 	rm -rf _build/ release/
 
 build:
-	go mod download
+	go mod tidy
 	CGO_ENABLED=0 go build -tags release -ldflags $(LD_FLAGS) -o jenkins-job-cli
 
 build-dev:

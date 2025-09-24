@@ -3,11 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"github.com/chzyer/readline"
-	"github.com/gocruncher/bar"
-	"github.com/gocruncher/jenkins-job-cli/cmd/jj"
-	"github.com/spf13/cobra"
-	"github.com/ttacon/chalk"
 	"net/url"
 	"os"
 	"os/signal"
@@ -15,6 +10,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chzyer/readline"
+	"github.com/gocruncher/bar"
+	"github.com/gocruncher/jenkins-job-cli/cmd/jj"
+	"github.com/spf13/cobra"
+	"github.com/ttacon/chalk"
 )
 
 var usageTamplate = `Usage:{{if .Runnable}}
@@ -83,7 +84,7 @@ func runPreRunE(cmd *cobra.Command, args []string) error {
 	return preRunE(cmd, args)
 }
 
-func askParams(params []jj.ParameterDefinitions) map[string]string {
+func askParams(params []*jj.ParameterDefinitions) map[string]string {
 	data := map[string]string{}
 	for _, pd := range params {
 		cline := ""
@@ -103,8 +104,8 @@ func askParams(params []jj.ParameterDefinitions) map[string]string {
 			if err != nil { // io.EOF
 				os.Exit(1)
 			}
-			if pd.Type == "ChoiceParameterDefinition" {
-
+			// log.Println(line, pd.Choices, pd.Name, pd.Type, "test info.......")
+			if pd.Type == "ChoiceParameterDefinition" || pd.Type == "GitParameterDefinition" {
 				for _, val := range pd.Choices {
 					if line == val {
 						cline = val
@@ -129,6 +130,9 @@ func askParams(params []jj.ParameterDefinitions) map[string]string {
 
 					continue
 				}
+				// } else if pd.Type == "GitParameterDefinition" {
+				// 	// git parameter
+				// 	cline = line
 			} else {
 				cline = line
 			}
@@ -159,7 +163,7 @@ func runJob(name string) {
 		err = fmt.Errorf("job '%s' does not exist", name)
 	}
 	check(err)
-	params := jobInfo.GetParameterDefinitions()
+	params := jobInfo.GetParameterDefinitions(env, name)
 	if len(params) == 0 {
 		rl, err := readline.New("Press any key to continue: ")
 		defer rl.Close()

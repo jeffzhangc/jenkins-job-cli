@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v2"
 )
 
 var homeDir string
@@ -51,7 +52,8 @@ func (t EType) String() string {
 	if t == EType("n") {
 		return "none"
 	}
-	return "undefined"
+	// return "undefined"
+	return string(t)
 }
 
 type Config struct {
@@ -199,6 +201,14 @@ type Queues struct {
 		URL string `json:"url"`
 		Why string `json:"why"`
 	} `json:"items"`
+}
+
+type GitParameterDefinition struct {
+	Values []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"values"`
+	Class string `json:"_class"`
 }
 
 func initConfig() {

@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v2"
 )
 
 // External API
@@ -65,13 +66,38 @@ func GetEnv(name string) (error, Env) {
 	return nil, env
 }
 
-func (ji *JobInfo) GetParameterDefinitions() []ParameterDefinitions {
+func (ji *JobInfo) GetParameterDefinitions(env Env, jobName string) []*ParameterDefinitions {
+	res := []*ParameterDefinitions{}
 	for _, j := range ji.Property {
 		if len(j.ParameterDefinitions) > 0 {
-			return j.ParameterDefinitions
+			// res :=
+			// return j.ParameterDefinitions
+			for _, pd := range j.ParameterDefinitions {
+				newPd := pd
+				res = append(res, &newPd)
+			}
+			go ji.initGitParameterDefinitions(res, env, jobName)
 		}
 	}
-	return []ParameterDefinitions{}
+	return res
+}
+
+func (ji *JobInfo) initGitParameterDefinitions(res []*ParameterDefinitions, env Env, jobName string) {
+	for _, pd := range res {
+		if pd.Type == "GitParameterDefinition" {
+			err, item := GetGitParameterDefinitionItems(env, jobName, pd.Name)
+			if err != nil {
+				fmt.Printf("error: %s\n", err)
+			} else {
+				// pd.Items = items
+				choices := []string{}
+				for _, item := range item.Values {
+					choices = append(choices, item.Name)
+				}
+				pd.Choices = choices
+			}
+		}
+	}
 }
 
 func GetDefEnv() EName {
@@ -125,21 +151,21 @@ func SetEnv(env Env) {
 
 }
 
-//func GetJobInfo(env Env, jobName string) JobInfo{
-//	var jobinfo JobInfo
-//	code, rsp, _, err := req(env,"job/"+jobName+"/api/json", []byte{})
-//	if err != nil {
-//		panic(err)
+//	func GetJobInfo(env Env, jobName string) JobInfo{
+//		var jobinfo JobInfo
+//		code, rsp, _, err := req(env,"job/"+jobName+"/api/json", []byte{})
+//		if err != nil {
+//			panic(err)
+//		}
+//		if code != 200 {
+//			panic("failed to get job details,code" + strconv.Itoa(code) + ", " + string(rsp))
+//		}
+//		err = json.Unmarshal(rsp, &jobinfo)
+//		if err!=nil{
+//			panic("failed to get Job information")
+//		}
+//		return jobinfo
 //	}
-//	if code != 200 {
-//		panic("failed to get job details,code" + strconv.Itoa(code) + ", " + string(rsp))
-//	}
-//	err = json.Unmarshal(rsp, &jobinfo)
-//	if err!=nil{
-//		panic("failed to get Job information")
-//	}
-//	return jobinfo
-//}
 func GetJobInfo(env Env, jobName string) (error, *JobInfo) {
 	bundle := GetBundle(env)
 	var jobInfo *JobInfo
@@ -164,7 +190,19 @@ func GetJobInfo(env Env, jobName string) (error, *JobInfo) {
 		}
 		mutex.Lock()
 		defer mutex.Unlock()
-		bundle.JobsInfo = append(bundle.JobsInfo, ji)
+		// the cache will be grown unlimitedly, need to be optimized
+		contained := false
+		for i, j := range bundle.JobsInfo {
+			if j.Name == jobName {
+				bundle.JobsInfo[i] = ji
+				contained = true
+				break
+			}
+		}
+		if !contained {
+			bundle.JobsInfo = append(bundle.JobsInfo, ji)
+		}
+		// bundle.JobsInfo = append(bundle.JobsInfo, ji)
 		updateCache(env, bundle)
 		return nil, ji
 	}
@@ -328,4 +366,33 @@ func GetQueues(env Env) Queues {
 		panic("failed to get Queue list")
 	}
 	return queues
+}
+
+//	curl 'http://10.1.106.141:8080/job/report-web/descriptorByName/net.uaznia.lukanus.hudson.plugins.gitparameter.GitParameterDefinition/fillValueItems?param=adminBranch' \
+//	  -X 'POST' \
+//	  -H 'Accept: */*' \
+//	  -H 'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8' \
+//	  -H 'Connection: keep-alive' \
+//	  -H 'Content-Length: 0' \
+//	  -H 'Content-Type: application/x-www-form-urlencoded' \
+//	  -b 'jenkins-timestamper-offset=-28800000; remember-me=YWRtaW46MTc1OTg5NTA4MDU5OTo0MWI4NDZjYzFkNjg0YTFlMmExOTEzYTkxMDczOWRkODdmODE0MjgxY2I1MmNiYjk0NWNjZDcwYzZlNjAyODUx; JSESSIONID.d81c5b23=node017iwlciq0ccko15fez9e7es4vx1821.node0' \
+//	  -H 'Jenkins-Crumb: e0c529a2b0dd44e5df35eef7837952a1437d92e707937dc5e967f3623095892c' \
+//	  -H 'Origin: http://10.1.106.141:8080' \
+//	  -H 'Referer: http://10.1.106.141:8080/job/report-web/build?delay=0sec' \
+//	  -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36' \
+func GetGitParameterDefinitionItems(env Env, jobName string, paramName string) (error, *GitParameterDefinition) {
+	code, rsp, _, err := req(env, "POST", "job/"+jobName+"/descriptorByName/net.uaznia.lukanus.hudson.plugins.gitparameter.GitParameterDefinition/fillValueItems?param="+paramName, []byte{})
+	if err != nil {
+		return err, nil
+	}
+	if code != 200 {
+		return errors.New("failed to get job details,code" + strconv.Itoa(code) + ", " + string(rsp)), nil
+	}
+	var items GitParameterDefinition
+	err = json.Unmarshal(rsp, &items)
+	if err != nil {
+		return errors.New("failed to get Job information"), nil
+	}
+	return nil, &items
+
 }

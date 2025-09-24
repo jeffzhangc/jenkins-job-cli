@@ -2,9 +2,10 @@ package jj
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func getEnv(name string) Env {
@@ -16,11 +17,22 @@ func getEnv(name string) Env {
 	panic("no any envs")
 }
 
+func TestEnv(t *testing.T) {
+	varEnv := Env{
+		Name: "uat",
+		Url:  "http://jenkins.uat.example.com",
+		Type: "basic",
+	}
+	t.Errorf("env: %v", varEnv)
+}
+
 func TestInit(t *testing.T) {
-	e := getEnv("uat")
+	e := getEnv("aicc")
 	time.Sleep(time.Second * 3)
-	GetJobInfo(e, "core-change-zone")
-	fmt.Println("jd ", e)
+	initBundle(e)
+	er, ff := GetJobInfo(e, "cc-cas")
+	// fmt.Println("jd ", e)
+	t.Errorf("env: %v,%v", er, ff)
 }
 
 func TestGetLastSuccessfulBuildDuration(t *testing.T) {
