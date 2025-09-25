@@ -244,7 +244,7 @@ func barHandler(jobUrl string, keyCh chan string, chMsg chan string, finishCh ch
 	fmt.Print("\033[F")
 	br := bar.NewWithOpts(
 		bar.WithDimensions(100, 20),
-		bar.WithLines(1),
+		bar.WithLines(15),
 		bar.WithFormat(
 			fmt.Sprintf(
 				"%srunning...%s :percent :bar %s:eta%s",
@@ -305,6 +305,13 @@ func barHandler(jobUrl string, keyCh chan string, chMsg chan string, finishCh ch
 
 func watchTheJob(env jj.Env, name string, number int, keyCh chan string) error {
 	jobUrl := env.Url + "/job/" + name + "/" + strconv.Itoa(number) + "/console"
+	fmt.Println(chalk.Red.Color("Job link:"), chalk.Underline.TextStyle(jobUrl))
+	os.Stdout.Sync()
+	//clearer := strings.Repeat(" ", int(110)-1)
+	fmt.Println("")
+	fmt.Println("")
+	fmt.Println("")
+	time.Sleep(time.Millisecond * 200)
 	lastBuild, _ := jj.GetLastSuccessfulBuildInfo(env, name)
 	listenerStatus = true
 	defer func() {
