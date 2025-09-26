@@ -323,6 +323,14 @@ func CancelJob(env Env, job string, id int) (string, error) {
 	return bi.Result, nil
 }
 
+func GetConsoleUrl(env Env, job string, id int) string {
+	url := env.Url
+	if !strings.HasSuffix(url, "/") {
+		url += "/"
+	}
+	return url + "job/" + job + "/" + strconv.Itoa(id) + "/console"
+}
+
 func Console(env Env, job string, id int, start string) (string, string, error) {
 	//web-rpm-build-manual/149/logText/progressiveHtml
 	code, rsp, h, err := req(env, "POST", "job/"+job+"/"+strconv.Itoa(id)+"/logText/progressiveHtml", []byte("start="+start))
@@ -366,6 +374,71 @@ func GetQueues(env Env) Queues {
 		panic("failed to get Queue list")
 	}
 	return queues
+}
+
+// 获取所有正在运行的 build（即 building=true 的 build）
+type RunningBuild struct {
+	JobName  string
+	BuildNum int
+	Result   string
+	URL      string
+	Duration int64 `json:"duration"`
+}
+
+// 使用计算机API直接获取正在执行的构建（推荐）
+func GetRunningBuildsByComputer(env Env) ([]RunningBuild, error) {
+	apiPath := "/computer/api/json?tree=computer[displayName,executors[currentExecutable[url,number,timestamp,duration,fullDisplayName]]]"
+	code, rsp, _, err := req(env, "GET", apiPath, []byte{})
+	if err != nil {
+		return nil, err
+	}
+	if code != 200 {
+		return nil, fmt.Errorf("failed to get computer info, code %d", code)
+	}
+
+	var data struct {
+		Computer []struct {
+			DisplayName string `json:"displayName"`
+			Executors   []struct {
+				CurrentExecutable *struct {
+					URL             string `json:"url"`
+					Number          int    `json:"number"`
+					FullDisplayName string `json:"fullDisplayName"`
+					Duration        int64  `json:"duration"`
+				} `json:"currentExecutable"`
+			} `json:"executors"`
+		} `json:"computer"`
+	}
+
+	err = json.Unmarshal(rsp, &data)
+	if err != nil {
+		return nil, err
+	}
+
+	var running []RunningBuild
+	for _, computer := range data.Computer {
+		for _, executor := range computer.Executors {
+			if executor.CurrentExecutable != nil {
+				// 从 fullDisplayName 解析 job name，格式如: "job-name #123"
+				fullName := executor.CurrentExecutable.FullDisplayName
+				jobName := ""
+				if idx := strings.LastIndex(fullName, " #"); idx != -1 {
+					jobName = fullName[:idx]
+				} else {
+					jobName = fullName
+				}
+
+				running = append(running, RunningBuild{
+					JobName:  jobName,
+					BuildNum: executor.CurrentExecutable.Number,
+					Result:   "BUILDING", // 正在执行中
+					URL:      executor.CurrentExecutable.URL,
+					Duration: executor.CurrentExecutable.Duration,
+				})
+			}
+		}
+	}
+	return running, nil
 }
 
 //	curl 'http://10.1.106.141:8080/job/report-web/descriptorByName/net.uaznia.lukanus.hudson.plugins.gitparameter.GitParameterDefinition/fillValueItems?param=adminBranch' \

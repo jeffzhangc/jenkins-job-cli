@@ -304,7 +304,8 @@ func barHandler(jobUrl string, keyCh chan string, chMsg chan string, finishCh ch
 }
 
 func watchTheJob(env jj.Env, name string, number int, keyCh chan string) error {
-	jobUrl := env.Url + "/job/" + name + "/" + strconv.Itoa(number) + "/console"
+	// jobUrl := env.Url + "/job/" + name + "/" + strconv.Itoa(number) + "/console"
+	jobUrl := jj.GetConsoleUrl(env, name, number)
 	fmt.Println(chalk.Red.Color("Job link:"), chalk.Underline.TextStyle(jobUrl))
 	os.Stdout.Sync()
 	//clearer := strings.Repeat(" ", int(110)-1)
