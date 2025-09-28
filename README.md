@@ -76,12 +76,20 @@ jj run -n prod web-build
 
 # makes a specific Jenkins name by default
 jj use PROD  
+
+# list all running jobs
+jj console
+
+# display the console of the latest job
+jj console app-xxx
 ```
 
 ## Futures
 - cancellation job (Ctrl+C key)
 - resize of the output (just press enter key)
 - output of child jobs   
+- show console info
+- show quick run history job for jj command with params
 
 ## Useful packages
 - [cobra](https://github.com/spf13/cobra) - library for creating powerful modern CLI

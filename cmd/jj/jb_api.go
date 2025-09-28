@@ -166,6 +166,7 @@ func SetEnv(env Env) {
 //		}
 //		return jobinfo
 //	}
+
 func GetJobInfo(env Env, jobName string) (error, *JobInfo) {
 	bundle := GetBundle(env)
 	var jobInfo *JobInfo
@@ -263,6 +264,7 @@ func GetBuildInfo(env Env, job string, id int) (*BuildInfo, error) {
 	if code != 200 {
 		return nil, errors.New("failed to get job details,code" + strconv.Itoa(code) + ", " + string(rsp))
 	}
+	// fmt.Println(string(rsp))
 	var bi BuildInfo
 	err = json.Unmarshal(rsp, &bi)
 	if err != nil {
@@ -378,16 +380,16 @@ func GetQueues(env Env) Queues {
 
 // 获取所有正在运行的 build（即 building=true 的 build）
 type RunningBuild struct {
-	JobName  string
-	BuildNum int
-	Result   string
-	URL      string
-	Duration int64 `json:"duration"`
+	JobName   string
+	BuildNum  int
+	Result    string
+	URL       string
+	Timestamp int64
 }
 
 // 使用计算机API直接获取正在执行的构建（推荐）
 func GetRunningBuildsByComputer(env Env) ([]RunningBuild, error) {
-	apiPath := "/computer/api/json?tree=computer[displayName,executors[currentExecutable[url,number,timestamp,duration,fullDisplayName]]]"
+	apiPath := "/computer/api/json?tree=computer[displayName,executors[currentExecutable[url,number,timestamp,duration,fullDisplayName,estimatedDuration]]]"
 	code, rsp, _, err := req(env, "GET", apiPath, []byte{})
 	if err != nil {
 		return nil, err
@@ -405,6 +407,7 @@ func GetRunningBuildsByComputer(env Env) ([]RunningBuild, error) {
 					Number          int    `json:"number"`
 					FullDisplayName string `json:"fullDisplayName"`
 					Duration        int64  `json:"duration"`
+					Timestamp       int64  `json:"timestamp"`
 				} `json:"currentExecutable"`
 			} `json:"executors"`
 		} `json:"computer"`
@@ -416,6 +419,7 @@ func GetRunningBuildsByComputer(env Env) ([]RunningBuild, error) {
 	}
 
 	var running []RunningBuild
+	// fmt.Println(timeNow, string(rsp))
 	for _, computer := range data.Computer {
 		for _, executor := range computer.Executors {
 			if executor.CurrentExecutable != nil {
@@ -429,11 +433,11 @@ func GetRunningBuildsByComputer(env Env) ([]RunningBuild, error) {
 				}
 
 				running = append(running, RunningBuild{
-					JobName:  jobName,
-					BuildNum: executor.CurrentExecutable.Number,
-					Result:   "BUILDING", // 正在执行中
-					URL:      executor.CurrentExecutable.URL,
-					Duration: executor.CurrentExecutable.Duration,
+					JobName:   jobName,
+					BuildNum:  executor.CurrentExecutable.Number,
+					Result:    "BUILDING", // 正在执行中
+					URL:       executor.CurrentExecutable.URL,
+					Timestamp: executor.CurrentExecutable.Timestamp,
 				})
 			}
 		}

@@ -214,6 +214,8 @@ func runJob(name string) {
 		curSt = st{}
 	}
 	fmt.Println(chalk.Green.Color("done"))
+
+	printQuickRunJobByID(env, name, number)
 	return
 }
 
@@ -597,4 +599,47 @@ func check(err error) {
 		fmt.Printf("\nError: %s\n", err.Error())
 		os.Exit(1)
 	}
+}
+
+func printQuickRunJobByID(env jj.Env, jobName string, jobNum int) {
+	if jobNum <= 0 {
+		err, jobInfo := jj.GetJobInfo(env, jobName)
+		if err != nil {
+			err = fmt.Errorf("job '%s' does not exist", jobName)
+			fmt.Printf("error: %s\n", err)
+			os.Exit(1)
+		}
+		jobNum = jobInfo.LastBuild.Number
+		if jobNum == 0 {
+			fmt.Printf("job '%s' has no build yet\n", jobName)
+			os.Exit(1)
+		}
+	}
+
+	buildInfo, err := jj.GetBuildInfo(env, jobName, jobNum)
+	if err != nil {
+		msg := fmt.Errorf("job '%s - %d' does not exist", jobName, jobNum)
+		fmt.Printf("error: %s\n", msg)
+		os.Exit(1)
+	}
+
+	quickCmd := []string{
+		"jj run " + jobName,
+	}
+
+	if len(buildInfo.Actions) > 0 {
+		for _, action := range buildInfo.Actions {
+			if action.Class == "hudson.model.ParametersAction" {
+				for _, param := range action.Parameters {
+					if param.Value == "" {
+						continue
+					}
+					// quickCmd[0] += " -a " + param.Name + "=" + param.Value
+					quickCmd = append(quickCmd, "-a "+param.Name+"="+param.Value)
+				}
+			}
+		}
+	}
+
+	fmt.Printf("\n\nquick commands jobName:%s, historyJobNum:%d \n%s\n", jobName, jobNum, strings.Join(quickCmd, " "))
 }

@@ -82,6 +82,7 @@ type View struct {
 type BuildInfo struct {
 	Id      string `json:"id"`
 	Actions []struct {
+		Class      string `json:"_class"`
 		Parameters []struct {
 			Name  string `json:"name"`
 			Value string `json:"value"`

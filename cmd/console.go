@@ -39,9 +39,9 @@ func init() {
 		Short: "Display running jobs or latest job console output",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			env := jj.Init(ENV)
+			// 列出正在运行的 jobs
+			items, err := jj.GetRunningBuildsByComputer(env)
 			if len(args) == 0 {
-				// 列出正在运行的 jobs
-				items, err := jj.GetRunningBuildsByComputer(env)
 				if err != nil {
 					return fmt.Errorf("get running builds failed: %v", err)
 				}
@@ -50,11 +50,26 @@ func init() {
 			}
 			// 显示某个 job 最新的 console 日志
 			jobName := args[0]
+
 			err, jobInfo := jj.GetJobInfo(env, jobName)
 			if err != nil {
 				return fmt.Errorf("get job info failed: %v", err)
 			}
+
+			runningFlag := false
+			var runningBuild *jj.RunningBuild = nil
+			for _, item := range items {
+				if item.JobName == jobName {
+					runningFlag = true
+					runningBuild = &item
+					break
+				}
+			}
+
 			buildNum := jobInfo.LastBuild.Number
+			if runningFlag {
+				buildNum = runningBuild.BuildNum
+			}
 			if buildNum == 0 {
 				return fmt.Errorf("job '%s' has no build yet", jobName)
 			}
@@ -64,7 +79,19 @@ func init() {
 			}
 			fmt.Println(strings.TrimRight(output, "\n"))
 			jobUrl := jj.GetConsoleUrl(env, jobName, buildNum)
-			fmt.Printf("\nConsole URL: %s\n", chalk.Underline.TextStyle(jobUrl))
+			fmt.Println("")
+
+			msg := fmt.Sprintf("Job Name: %s  Build #: %d  Running Status: %s",
+				jobName, buildNum, chalk.Red.Color(fmt.Sprintf("%v", runningFlag)))
+			if runningFlag && runningBuild != nil {
+				msg += fmt.Sprintf("  Duration: %s", formatDuration(runningBuild.Timestamp))
+			}
+			fmt.Println(msg)
+			fmt.Printf("Console URL: %s\n", chalk.Underline.TextStyle(jobUrl))
+
+			if !runningFlag {
+				printQuickRunJobByID(env, jobName, buildNum)
+			}
 			return nil
 		},
 		PreRunE: preRunE,
@@ -133,7 +160,7 @@ func PrintRunningBuilds(items []jj.RunningBuild) {
 		if len(result) > maxResult {
 			result = result[:maxResult-3] + "..."
 		}
-		durationStr := formatDuration(item.Duration)
+		durationStr := formatDuration(item.Timestamp)
 		urlDisplay := item.URL
 		if len(urlDisplay) > maxURL {
 			urlDisplay = urlDisplay[:maxURL-3] + "..."
@@ -147,17 +174,13 @@ func PrintRunningBuilds(items []jj.RunningBuild) {
 	fmt.Print(runningBuildsCache)
 }
 
-// 输出缓存内容
-func PrintRunningBuildsCache() {
-	fmt.Print(runningBuildsCache)
-}
-
 // 格式化持续时间
-func formatDuration(milliseconds int64) string {
-	if milliseconds == 0 {
+func formatDuration(timestamp int64) string {
+	if timestamp == 0 {
 		return "0s"
 	}
 
+	milliseconds := getTime() - timestamp
 	duration := time.Duration(milliseconds) * time.Millisecond
 	hours := int(duration.Hours())
 	minutes := int(duration.Minutes()) % 60
@@ -169,79 +192,6 @@ func formatDuration(milliseconds int64) string {
 		return fmt.Sprintf("%dm %02ds", minutes, seconds)
 	} else {
 		return fmt.Sprintf("%ds", seconds)
-	}
-}
-
-// 缩短URL显示
-func shortenURL(url string, maxLength int) string {
-	if len(url) <= maxLength {
-		return url
-	}
-
-	// 尝试提取有意义的最后部分
-	parts := strings.Split(url, "/")
-	if len(parts) >= 2 {
-		lastPart := parts[len(parts)-1]
-		secondLast := parts[len(parts)-2]
-
-		// 如果是构建URL，显示 jobname/buildnumber
-		if lastPart == "" && len(parts) >= 3 {
-			lastPart = parts[len(parts)-2]
-			secondLast = parts[len(parts)-3]
-		}
-
-		shortened := secondLast + "/" + lastPart
-		if len(shortened) <= maxLength {
-			return "..." + shortened
-		}
-	}
-
-	// 如果还是太长，直接截断
-	return "..." + url[len(url)-maxLength+3:]
-}
-
-// PrintRunningBuildsSimple prints a concise version (for lots of data)
-func PrintRunningBuildsSimple(items []jj.RunningBuild) {
-	if len(items) == 0 {
-		fmt.Println("No running builds")
-		return
-	}
-
-	fmt.Printf("%-40s %-8s %-12s %-10s\n",
-		"Job Name", "Build #", "Duration", "Status")
-	fmt.Println(strings.Repeat("-", 72))
-
-	for _, item := range items {
-		jobName := item.JobName
-		if len(jobName) > 37 {
-			jobName = jobName[:37] + "..."
-		}
-
-		result := item.Result
-		if result == "" {
-			result = "RUNNING"
-		}
-
-		durationStr := formatDurationSimple(item.Duration)
-
-		fmt.Printf("%-40s #%-7d %-12s %-10s\n",
-			jobName, item.BuildNum, durationStr, result)
-	}
-	fmt.Printf("Total: %d builds\n", len(items))
-}
-
-func formatDurationSimple(milliseconds int64) string {
-	if milliseconds == 0 {
-		return "0s"
-	}
-
-	duration := time.Duration(milliseconds) * time.Millisecond
-	if duration > time.Hour {
-		return fmt.Sprintf("%.1fh", duration.Hours())
-	} else if duration > time.Minute {
-		return fmt.Sprintf("%.0fm", duration.Minutes())
-	} else {
-		return fmt.Sprintf("%.0fs", duration.Seconds())
 	}
 }
 
@@ -257,7 +207,7 @@ func PrintRunningBuildsSorted(items []jj.RunningBuild) {
 	copy(sortedItems, items)
 	for i := 0; i < len(sortedItems)-1; i++ {
 		for j := i + 1; j < len(sortedItems); j++ {
-			if sortedItems[i].Duration < sortedItems[j].Duration {
+			if sortedItems[i].Timestamp < sortedItems[j].Timestamp {
 				sortedItems[i], sortedItems[j] = sortedItems[j], sortedItems[i]
 			}
 		}
