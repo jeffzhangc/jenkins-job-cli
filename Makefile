@@ -30,10 +30,10 @@ image:
 
 release:
 	mkdir release
-	go get github.com/progrium/gh-release/...
+	# go get github.com/progrium/gh-release/...
 	cp _build/* release
 	cd release; sha256sum --quiet --check sha256sums.txt
-	gh-release create gocruncher/$(NAME) $(VERSION) \
+	go run github.com/progrium/gh-release@latest create jeffzhangc/$(NAME) $(VERSION) \
 		$(shell git rev-parse --abbrev-ref HEAD) $(VERSION)
 
 .PHONY: build
