@@ -1,42 +1,46 @@
 # This is an example .goreleaser.yml file with some sensible defaults.
 # Make sure to check the documentation at https://goreleaser.com
+project_name: jenkins-job-cli
+
 before:
   hooks:
     # You may remove this if you don't use go modules.
     - go mod tidy
     # you may remove this if you don't need go generate
-    - go generate ./...
+    # - go generate ./...
+
 builds:
   - env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.build={{.ShortCommit}}
     goos:
       - linux
       - windows
       - darwin
-
+    goarch:
+      - amd64
+      - arm64
+    binary: jenkins-job-cli
+    # 为 Homebrew 创建 jj 符号链接
+    hooks:
+      post: cp {{ .Path }} {{ .Dir }}/jj
 
 archives:
   - format: tar.gz
-    # 手动处理操作系统名称的大小写
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- if eq .Os "darwin" }}Darwin
-      {{- else if eq .Os "linux" }}Linux
-      {{- else if eq .Os "windows" }}Windows
-      {{- else }}{{ .Os }}{{ end }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}_
-      {{- .Version }}
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README*
       - LICENSE*
       - CHANGELOG*
+      - jj  # 包含符号链接
 
 checksum:
   name_template: "checksums.txt"
+
 snapshot:
   name_template: "{{ incpatch .Version }}-next"
+
 changelog:
   sort: asc
   filters:
@@ -57,14 +61,14 @@ release:
   footer: |
     ## Thanks to all contributors! ❤️
 
-
 # Homebrew Tap 配置
 brews:
-  - name: jj
+  - name: jenkins-job-cli
     # Tap 仓库配置
     tap:
-      owner: jeffzhangc  # 你的 GitHub 用户名
-      name: homebrew-tap # Tap 仓库名
+      owner: jeffzhangc
+      name: homebrew-tap
+      branch: main
       token: "{{ .Env.GITHUB_TOKEN }}"
     
     # Formula 配置
@@ -73,22 +77,26 @@ brews:
     description: "Jenkins job CLI tool"
     license: "MIT"
     
-    # 安装配置
+    # 安装配置 - 安装两个二进制文件
     install: |
+      bin.install "jenkins-job-cli"
       bin.install "jj"
     
     # 测试配置
     test: |
+      system "#{bin}/jenkins-job-cli --version"
       system "#{bin}/jj --version"
     
-    # 依赖配置
-    dependencies:
-      - go
-    
     # 可选的配置
-    caveats: "Run `jj --help` to get started"
+    caveats: "You can use either 'jenkins-job-cli' or 'jj' command"
     
     # 只发布到稳定版本
     commit_author:
       name: goreleaser
       email: goreleaser@users.noreply.github.com
+
+    # 针对不同架构的 URL 模板
+    url_template: "https://github.com/{{ .ProjectOwner }}/{{ .ProjectName }}/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    
+    # 自定义下载策略，确保使用正确的二进制文件
+    download_strategy: CurlDownloadStrategy
