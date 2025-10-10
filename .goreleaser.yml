@@ -1,13 +1,8 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
 project_name: jenkins-job-cli
 
 before:
   hooks:
-    # You may remove this if you don't use go modules.
     - go mod tidy
-    # you may remove this if you don't need go generate
-    # - go generate ./...
 
 builds:
   - env:
@@ -22,9 +17,6 @@ builds:
       - amd64
       - arm64
     binary: jenkins-job-cli
-    # 为 Homebrew 创建 jj 符号链接
-    hooks:
-      post: cp {{ .Path }} {{ .Dir }}/jj
 
 archives:
   - format: tar.gz
@@ -33,7 +25,7 @@ archives:
       - README*
       - LICENSE*
       - CHANGELOG*
-      - jj  # 包含符号链接
+    wrap_in_directory: false
 
 checksum:
   name_template: "checksums.txt"
@@ -53,50 +45,52 @@ release:
     owner: jeffzhangc
     name: jenkins-job-cli
   
-  # 发布说明
+  # 简化的发布说明，避免使用可能不存在的变量
   header: |
-    ## What's Changed
-    Full Changelog: [{{ .PreviousTag }}...{{ .Tag }}]({{ .RepoURL }}/compare/{{ .PreviousTag }}...{{ .Tag }})
+    ## Release {{ .Tag }}
+    
+    Jenkins Job CLI tool for managing Jenkins jobs programmatically.
   
   footer: |
-    ## Thanks to all contributors! ❤️
+    ### Installation
+    
+    **Using Homebrew:**
+    ```bash
+    brew install jeffzhangc/tap/jenkins-job-cli
+    ```
+    
+    **Manual installation:**
+    Download the binary for your platform from the Assets section below.
+    
+    ### Usage
+    ```bash
+    jj --help
+    ```
 
 # Homebrew Tap 配置
 brews:
   - name: jenkins-job-cli
-    # Tap 仓库配置
     tap:
       owner: jeffzhangc
       name: homebrew-tap
       branch: main
       token: "{{ .Env.GITHUB_TOKEN }}"
     
-    # Formula 配置
     folder: Formula
     homepage: "https://github.com/jeffzhangc/jenkins-job-cli"
     description: "Jenkins job CLI tool"
     license: "MIT"
     
-    # 安装配置 - 安装两个二进制文件
     install: |
       bin.install "jenkins-job-cli"
-      bin.install "jj"
+      bin.install_symlink "jenkins-job-cli" => "jj"
     
-    # 测试配置
     test: |
       system "#{bin}/jenkins-job-cli --version"
       system "#{bin}/jj --version"
     
-    # 可选的配置
     caveats: "You can use either 'jenkins-job-cli' or 'jj' command"
     
-    # 只发布到稳定版本
     commit_author:
       name: goreleaser
       email: goreleaser@users.noreply.github.com
-
-    # 针对不同架构的 URL 模板
-    url_template: "https://github.com/{{ .ProjectOwner }}/{{ .ProjectName }}/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-    
-    # 自定义下载策略，确保使用正确的二进制文件
-    download_strategy: CurlDownloadStrategy

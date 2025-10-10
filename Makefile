@@ -58,23 +58,12 @@ goreleaser-check:
 
 # Test build with GoReleaser (no release)
 goreleaser-snapshot: clean goreleaser-check
-	goreleaser release --snapshot --clean
+	goreleaser release --snapshot
 
 # Full release with GoReleaser (includes Homebrew tap)
 release: clean goreleaser-check
 	@echo "Releasing version $(VERSION) with GoReleaser..."
-	@if [ -z "$$GITHUB_TOKEN" ]; then \
-		if command -v gh >/dev/null 2>&1; then \
-			export GITHUB_TOKEN=$$(gh auth token); \
-			echo "Using GitHub token from gh CLI"; \
-		else \
-			echo "Error: GITHUB_TOKEN is not set and gh CLI is not available."; \
-			echo "Please set it: export GITHUB_TOKEN=ghp_xxx"; \
-			echo "Or install gh: brew install gh && gh auth login"; \
-			exit 1; \
-		fi \
-	fi
-	goreleaser release --clean
+	@export GITHUB_TOKEN=$$(gh auth token) && goreleaser release
 
 # Initialize GoReleaser configuration
 goreleaser-init:
