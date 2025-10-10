@@ -1,94 +1,175 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
+version: 2
+project_name: jenkins-job-cli
+
 before:
   hooks:
-    # You may remove this if you don't use go modules.
     - go mod tidy
-    # you may remove this if you don't need go generate
-    - go generate ./...
+    - ./scripts/completions.sh
+
 builds:
   - env:
       - CGO_ENABLED=0
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser -X main.treeState={{ .IsGitDirty }}
     goos:
       - linux
       - windows
       - darwin
-
+    goarch:
+      - amd64
+      - arm64
+    binary: jenkins-job-cli
 
 archives:
-  - format: tar.gz
-    # 手动处理操作系统名称的大小写
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- if eq .Os "darwin" }}Darwin
-      {{- else if eq .Os "linux" }}Linux
-      {{- else if eq .Os "windows" }}Windows
-      {{- else }}{{ .Os }}{{ end }}_
+  - name_template: >-
+      {{- .ProjectName }}_
+      {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}_
-      {{- .Version }}
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end -}}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    builds_info:
+      group: root
+      owner: root
+      mtime: "{{ .CommitDate }}"
     files:
-      - README*
-      - LICENSE*
-      - CHANGELOG*
+      - src: README.md
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSE
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: completions/*
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: "checksums.txt"
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+
+# snapshot:
+# name_template: "{{ incpatch .Version }}-next"
+
 changelog:
   sort: asc
+  use: github
+  format: "{{ .SHA }}: {{ .Message }}{{ with .AuthorUsername }} (@{{ . }}){{ end }}"
   filters:
     exclude:
-      - "^docs:"
       - "^test:"
+      - "^test\\("
+      - "^chore: update$"
+      - "^chore: docs$"
+      - "^docs: update$"
+      - "^chore: schema$"
+      - "^chore: typo$"
+      - "^chore: auto-update generated files$"
+      - "^chore: update schema$"
+      - "^chore: schema update$"
+      - "^chore\\(deps\\): "
+      - "^(build|ci): "
+      - "merge conflict"
+      - "merge conflict"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+      - go mod tidy
+  groups:
+    - title: "New Features"
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 100
+    - title: "Security updates"
+      regexp: '^.*?sec(\(.+\))??!?:.+$'
+      order: 150
+    - title: "Bug fixes"
+      regexp: '^.*?(fix|refactor)(\(.+\))??!?:.+$'
+      order: 200
+    - title: "Documentation updates"
+      regexp: ^.*?docs?(\(.+\))??!?:.+$
+      order: 400
+    - title: Other work
+      order: 9999
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
 
 release:
   github:
     owner: jeffzhangc
     name: jenkins-job-cli
-  
-  # 发布说明
+
+  # 简化的发布说明，避免使用可能不存在的变量
   header: |
-    ## What's Changed
-    Full Changelog: [{{ .PreviousTag }}...{{ .Tag }}]({{ .RepoURL }}/compare/{{ .PreviousTag }}...{{ .Tag }})
-  
+    ## Release {{ .Tag }}
+
+    Jenkins Job CLI tool for managing Jenkins jobs programmatically.
+
   footer: |
-    ## Thanks to all contributors! ❤️
+    ### Installation
 
+    **Using Homebrew:**
+    ```bash
+    brew install jeffzhangc/tap/jenkins-job-cli
+    ```
 
-# Homebrew Tap 配置
-brews:
-  - name: jj
-    # Tap 仓库配置
-    tap:
-      owner: jeffzhangc  # 你的 GitHub 用户名
-      name: homebrew-tap # Tap 仓库名
-      token: "{{ .Env.GITHUB_TOKEN }}"
-    
-    # Formula 配置
-    folder: Formula
+    **Manual installation:**
+    Download the binary for your platform from the Assets section below.
+
+    ### Usage
+    ```bash
+    jj --help
+    ```
+
+homebrew_casks:
+  - repository:
+      owner: jeffzhangc
+      name: homebrew-tap
+    name: jenkins-job-cli
     homepage: "https://github.com/jeffzhangc/jenkins-job-cli"
-    description: "Jenkins job CLI tool"
-    license: "MIT"
-    
-    # 安装配置
-    install: |
-      bin.install "jj"
-    
-    # 测试配置
-    test: |
-      system "#{bin}/jj --version"
-    
-    # 依赖配置
-    dependencies:
-      - go
-    
-    # 可选的配置
-    caveats: "Run `jj --help` to get started"
-    
-    # 只发布到稳定版本
-    commit_author:
-      name: goreleaser
-      email: goreleaser@users.noreply.github.com
+    description: jenkins cli , simplified
+    license: MIT
+    completions:
+      bash: "completions/jj.bash"
+      zsh: "completions/jj.zsh"
+      fish: "completions/jj.fish"
+    binary: "jenkins-job-cli"
+    url:
+      verified: github.com/jeffzhangc/jenkins-job-cli/download
+    uninstall:
+      trash:
+        - "~/.jj"
+    caveats: "jj help"
+    hooks:
+      post:
+        install: |
+          target = if Hardware::CPU.arm?
+            '/opt/homebrew/bin/jj'
+          else
+            '/usr/local/bin/jj'
+          end
+          system_command '/bin/ln',
+                        args: ['-sf', "#{staged_path}/jenkins-job-cli", target],
+                        sudo: true
+
+# brews:
+#   - name: jenkins-job-cli
+#     repository:
+#       owner: jeffzhangc
+#       name: homebrew-tap
+#     homepage: "https://github.com/jeffzhangc/jenkins-job-cli"
+#     description: "jenkins cli , simplified"
+#     license: "MIT"
+#     url_template: "https://github.com/jeffzhangc/jenkins-job-cli/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+#     install: |
+#       bin.install "jenkins-job-cli"
+#       bin.install_symlink bin/"jenkins-job-cli" => "jj"
+#     caveats: "Run `jj help` for usage"

@@ -9,3 +9,4 @@ jenkins-job-cli
 /_build/
 
 dist/
+completions/

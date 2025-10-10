@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,11 +19,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/gocruncher/jenkins-job-cli/cmd/jj"
-	"github.com/spf13/cobra"
 	"io"
 	"os"
 	"time"
+
+	"github.com/gocruncher/jenkins-job-cli/cmd/jj"
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -90,13 +91,7 @@ var rootCmd = &cobra.Command{
 any Jenkins job. Before you start, please configure access to
 to the Jenkins service using "jj set" command. After that, you can 
 enable shell autocompletion for convenient work. To do this, run following:
-   # for zsh completion:	
-   echo 'source <(jj completion zsh)' >>~/.zshrc
-
-   # for bash completion:
-   echo 'source <(jj completion bash)' >>~/.bashrc
-
-if this does not work for some reason, try calling "jj completion check" command that might help you to figure out what is wrong
+   'jj completion -h'
 
 `,
 	//ValidArgs: []string{"run","get","set","del","completion"},

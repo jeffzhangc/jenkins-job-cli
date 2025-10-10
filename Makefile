@@ -3,91 +3,87 @@ VERSION=$(shell cat VERSION)
 BUILD=$(shell git rev-parse --short HEAD)
 EXT_LD_FLAGS="-Wl,--allow-multiple-definition"
 LD_FLAGS="-s -w -X main.version=$(VERSION) -X main.build=$(BUILD) -extldflags=$(EXT_LD_FLAGS)"
-TAP_REPO=jeffzhangc/homebrew-tap
-RELEASE_REPO=jeffzhangc/jenkins-job-cli
 
+# Default target
+all: build
+
+# Clean build artifacts
 clean:
 	rm -rf _build/ release/ dist/
 
+# Build for current platform
 build:
 	go mod tidy
-	CGO_ENABLED=0 go build -tags release -ldflags $(LD_FLAGS) -o jenkins-job-cli
+	CGO_ENABLED=0 go build -tags release -ldflags $(LD_FLAGS) -o $(NAME)
+	cp $(NAME) jj  # 创建符号链接
 
+# Development build
 build-dev:
 	go build -ldflags "-w -X main.version=$(VERSION)-dev -X main.build=$(BUILD) -extldflags=$(EXT_LD_FLAGS)"
+	cp $(NAME) jj  # 创建符号链接
 
+# Build for all platforms (legacy, kept for compatibility)
 build-all: clean
 	@echo "Building for all platforms..."
 	mkdir -p _build
-	GOOS=darwin  GOARCH=arm64 go build -tags release -ldflags $(LD_FLAGS) -o _build/jenkins-job-cli-$(VERSION)-darwin-arm64
-	GOOS=darwin GOARCH=arm64 go build -tags release -ldflags $(LD_FLAGS) -o _build/jenkins-job-cli-$(VERSION)-darwin-arm64
-	GOOS=darwin  GOARCH=amd64 go build -tags release -ldflags $(LD_FLAGS) -o _build/jenkins-job-cli-$(VERSION)-darwin-amd64
-	GOOS=linux   GOARCH=amd64 go build -tags release -ldflags $(LD_FLAGS) -o _build/jenkins-job-cli-$(VERSION)-linux-amd64
-	GOOS=linux   GOARCH=arm   go build -tags release -ldflags $(LD_FLAGS) -o _build/jenkins-job-cli-$(VERSION)-linux-arm
-	GOOS=linux   GOARCH=arm64 go build -tags release -ldflags $(LD_FLAGS) -o _build/jenkins-job-cli-$(VERSION)-linux-arm64
-	GOOS=windows GOARCH=amd64 go build -tags release -ldflags $(LD_FLAGS) -o _build/jenkins-job-cli-$(VERSION)-windows-amd64
-	cd _build; sha256sum * > sha256sums.txt
+	GOOS=darwin  GOARCH=arm64 go build -tags release -ldflags $(LD_FLAGS) -o _build/$(NAME)-$(VERSION)-darwin-arm64
+	GOOS=darwin  GOARCH=amd64 go build -tags release -ldflags $(LD_FLAGS) -o _build/$(NAME)-$(VERSION)-darwin-amd64
+	GOOS=linux   GOARCH=amd64 go build -tags release -ldflags $(LD_FLAGS) -o _build/$(NAME)-$(VERSION)-linux-amd64
+	GOOS=linux   GOARCH=arm   go build -tags release -ldflags $(LD_FLAGS) -o _build/$(NAME)-$(VERSION)-linux-arm
+	GOOS=linux   GOARCH=arm64 go build -tags release -ldflags $(LD_FLAGS) -o _build/$(NAME)-$(VERSION)-linux-arm64
+	GOOS=windows GOARCH=amd64 go build -tags release -ldflags $(LD_FLAGS) -o _build/$(NAME)-$(VERSION)-windows-amd64
+	cd _build; shasum -a 256 * > sha256sums.txt
 	@echo "Build completed."
 
+# Docker image
 image:
-	docker build -t jenkins-job-cli -f Dockerfile .
+	docker build -t $(NAME) -f Dockerfile .
 
-release: build-all
-	@command -v gh >/dev/null 2>&1 || { \
-		echo "Error: GitHub CLI (gh) is required but not installed."; \
-		echo "Install it from: https://cli.github.com/"; \
-		echo "Or run: brew install gh"; \
-		exit 1; \
-	}
-	@echo "Releasing version $(VERSION)..."
-	mkdir release
-	# go get github.com/progrium/gh-release/...
-	cp _build/* release
-	cd release; sha256sum --quiet --check sha256sums.txt
-	#go run github.com/progrium/gh-release@latest create jeffzhangc/$(NAME) $(VERSION) \
-	#	$(shell git rev-parse --abbrev-ref HEAD) $(VERSION)
-	gh release create v${VERSION} release/* --title "v${VERSION}" --notes "Release v${VERSION}" --repo ${RELEASE_REPO}
-	@echo "Release v$(VERSION) created."
-
-
-# Install to local system (adjust path as needed)
+# Install to local system
 install: build
 	@echo "Installing $(NAME) to /usr/local/bin/..."
-	sudo cp $(NAME) /usr/local/bin/jj
-	@echo "Installation completed."
+	sudo cp $(NAME) /usr/local/bin/
+	sudo cp /usr/local/bin/$(NAME) /usr/local/bin/jj # 同时安装 jj 命令
+	@echo "Installation completed. You can use 'jenkins-job-cli' or 'jj'"
 
-
-
-# 使用 GoReleaser 发布
-goreleaser-release: clean
+# Test GoReleaser configuration
+goreleaser-check:
 	@command -v goreleaser >/dev/null 2>&1 || { \
 		echo "Error: goreleaser is required but not installed."; \
 		echo "Install it from: https://goreleaser.com/install/"; \
 		echo "Or run: brew install goreleaser"; \
 		exit 1; \
 	}
-	@if [ -z "$(GITHUB_TOKEN)" ]; then \
-		echo "Error: GITHUB_TOKEN is not set."; \
-		echo "Please set it: export GITHUB_TOKEN=ghp_xxx"; \
-		exit 1; \
-	fi
-	@echo "Releasing with GoReleaser..."
-	goreleaser release
-
-# 测试 GoReleaser 配置（不实际发布）
-goreleaser-snapshot: clean
-	goreleaser release --snapshot
-
-# 检查 GoReleaser 配置
-goreleaser-check:
 	goreleaser check
 
-# 完整的发布流程（包含 Homebrew）
-full-release: goreleaser-release
-	@echo "Full release with Homebrew tap completed!"
+# Test build with GoReleaser (no release)
+goreleaser-snapshot: clean goreleaser-check
+	goreleaser release --snapshot
 
-# 初始化 GoReleaser 配置
+# Full release with GoReleaser (includes Homebrew tap)
+release: clean goreleaser-check
+	@echo "Releasing version $(VERSION) with GoReleaser..."
+	@export GITHUB_TOKEN=$$(gh auth token) && goreleaser release
+
+# Initialize GoReleaser configuration
 goreleaser-init:
+	@command -v goreleaser >/dev/null 2>&1 || { \
+		echo "Error: goreleaser is required but not installed."; \
+		echo "Install it from: https://goreleaser.com/install/"; \
+		exit 1; \
+	}
 	goreleaser init
 
-.PHONY: build
+# Show help
+help:
+	@echo "Available targets:"
+	@echo "  build              - Build for current platform (creates jj alias)"
+	@echo "  build-dev          - Development build"
+	@echo "  build-all          - Build for all platforms (legacy)"
+	@echo "  release            - Release with GoReleaser + Homebrew tap (main target)"
+	@echo "  goreleaser-snapshot- Test build with GoReleaser"
+	@echo "  goreleaser-check   - Check GoReleaser configuration"
+	@echo "  install            - Install to /usr/local/bin/ (both jenkins-job-cli and jj)"
+	@echo "  clean              - Clean build artifacts"
+
+.PHONY: all clean build build-dev build-all image install goreleaser-check goreleaser-snapshot release goreleaser-init help
