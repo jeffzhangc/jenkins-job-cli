@@ -45,7 +45,7 @@ release: build-all
 	cd release; sha256sum --quiet --check sha256sums.txt
 	#go run github.com/progrium/gh-release@latest create jeffzhangc/$(NAME) $(VERSION) \
 	#	$(shell git rev-parse --abbrev-ref HEAD) $(VERSION)
-	gh release create v${VERSION} release/* --title "v${VERSION}" --notes "Release v${VERSION}" 
+	gh release create v${VERSION} release/* --title "v${VERSION}" --notes "Release v${VERSION}" --repo jeffzhangc/jenkins-job-cli
 	@echo "Release v$(VERSION) created."
 
 
