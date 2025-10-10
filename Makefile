@@ -48,4 +48,10 @@ release: build-all
 	@echo "Release v$(VERSION) created."
 
 
+# Install to local system (adjust path as needed)
+install: build
+	@echo "Installing $(NAME) to /usr/local/bin/..."
+	sudo cp $(NAME) /usr/local/bin/jj
+	@echo "Installation completed."
+
 .PHONY: build
