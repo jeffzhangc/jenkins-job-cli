@@ -1,0 +1,94 @@
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+    # you may remove this if you don't need go generate
+    - go generate ./...
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+
+
+archives:
+  - format: tar.gz
+    # 手动处理操作系统名称的大小写
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- if eq .Os "darwin" }}Darwin
+      {{- else if eq .Os "linux" }}Linux
+      {{- else if eq .Os "windows" }}Windows
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}_
+      {{- .Version }}
+    files:
+      - README*
+      - LICENSE*
+      - CHANGELOG*
+
+checksum:
+  name_template: "checksums.txt"
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    owner: jeffzhangc
+    name: jenkins-job-cli
+  
+  # 发布说明
+  header: |
+    ## What's Changed
+    Full Changelog: [{{ .PreviousTag }}...{{ .Tag }}]({{ .RepoURL }}/compare/{{ .PreviousTag }}...{{ .Tag }})
+  
+  footer: |
+    ## Thanks to all contributors! ❤️
+
+
+# Homebrew Tap 配置
+brews:
+  - name: jj
+    # Tap 仓库配置
+    tap:
+      owner: jeffzhangc  # 你的 GitHub 用户名
+      name: homebrew-tap # Tap 仓库名
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    
+    # Formula 配置
+    folder: Formula
+    homepage: "https://github.com/jeffzhangc/jenkins-job-cli"
+    description: "Jenkins job CLI tool"
+    license: "MIT"
+    
+    # 安装配置
+    install: |
+      bin.install "jj"
+    
+    # 测试配置
+    test: |
+      system "#{bin}/jj --version"
+    
+    # 依赖配置
+    dependencies:
+      - go
+    
+    # 可选的配置
+    caveats: "Run `jj --help` to get started"
+    
+    # 只发布到稳定版本
+    commit_author:
+      name: goreleaser
+      email: goreleaser@users.noreply.github.com

@@ -7,3 +7,5 @@
 jenkins-job-cli
 /trush/
 /_build/
+
+dist/
