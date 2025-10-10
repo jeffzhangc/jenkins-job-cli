@@ -66,13 +66,13 @@ goreleaser-release: clean
 		echo "Or run: brew install goreleaser"; \
 		exit 1; \
 	}
-	@if [ -z "$(GITHUB_TOKEN)" ]; then \
-		echo "Error: GITHUB_TOKEN is not set."; \
-		echo "Please set it: export GITHUB_TOKEN=ghp_xxx"; \
-		exit 1; \
-	fi
+# 	@if [ -z "$(GITHUB_TOKEN)" ]; then \
+# 		echo "Error: GITHUB_TOKEN is not set."; \
+# 		echo "Please set it: export GITHUB_TOKEN=ghp_xxx"; \
+# 		exit 1; \
+# 	fi
 	@echo "Releasing with GoReleaser..."
-	goreleaser release
+	@export GITHUB_TOKEN=$$(gh auth token) && goreleaser release
 
 # 测试 GoReleaser 配置（不实际发布）
 goreleaser-snapshot: clean
