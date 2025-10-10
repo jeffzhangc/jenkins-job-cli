@@ -57,7 +57,7 @@ goreleaser-check:
 
 # Test build with GoReleaser (no release)
 goreleaser-snapshot: clean goreleaser-check
-	goreleaser release --snapshot --clean
+	goreleaser release --snapshot 
 
 # Full release with GoReleaser (includes Homebrew tap)
 release: clean goreleaser-check
@@ -68,7 +68,7 @@ release: clean goreleaser-check
 		echo "Or run: gh auth login"; \
 		exit 1; \
 	fi
-	goreleaser release --clean
+	goreleaser release
 
 # Update Homebrew tap formula (standalone)
 update-tap:
