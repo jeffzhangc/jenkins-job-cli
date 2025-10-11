@@ -141,10 +141,35 @@ homebrew_casks:
       bash: "completions/jj.bash"
       zsh: "completions/jj.zsh"
       fish: "completions/jj.fish"
-    binary: "jj"
+    binary: "jenkins-job-cli"
     url:
       verified: github.com/jeffzhangc/jenkins-job-cli/download
     uninstall:
       trash:
         - "~/.jj"
-    caveats: "jj help"        
+    caveats: "jj help"
+    hooks:
+      post:
+        install: |
+          target = if Hardware::CPU.arm?
+            '/opt/homebrew/bin/jj'
+          else
+            '/usr/local/bin/jj'
+          end
+          system_command '/bin/ln',
+                        args: ['-sf', "#{staged_path}/jenkins-job-cli", target],
+                        sudo: true
+
+# brews:
+#   - name: jenkins-job-cli
+#     repository:
+#       owner: jeffzhangc
+#       name: homebrew-tap
+#     homepage: "https://github.com/jeffzhangc/jenkins-job-cli"
+#     description: "jenkins cli , simplified"
+#     license: "MIT"
+#     url_template: "https://github.com/jeffzhangc/jenkins-job-cli/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+#     install: |
+#       bin.install "jenkins-job-cli"
+#       bin.install_symlink bin/"jenkins-job-cli" => "jj"
+#     caveats: "Run `jj help` for usage"
