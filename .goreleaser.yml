@@ -1,5 +1,5 @@
-project_name: jenkins-job-cli
 version: 2
+project_name: jenkins-job-cli
 
 before:
   hooks:
@@ -20,7 +20,7 @@ builds:
     binary: jenkins-job-cli
 
 archives:
-  - format: tar.gz
+  - formats: ["tar.gz"]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README*
@@ -31,8 +31,8 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+# snapshot:
+  # name_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -71,13 +71,13 @@ release:
 # Homebrew Tap 配置
 brews:
   - name: jenkins-job-cli
-    tap:
+    repository:
       owner: jeffzhangc
       name: homebrew-tap
       branch: main
       token: "{{ .Env.GITHUB_TOKEN }}"
     
-    folder: Formula
+    directory: Formula
     homepage: "https://github.com/jeffzhangc/jenkins-job-cli"
     description: "Jenkins job CLI tool"
     license: "MIT"
