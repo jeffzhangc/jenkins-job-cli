@@ -147,3 +147,8 @@ homebrew_casks:
       trash:
         - "~/.jj"
     caveats: "jj help"
+    hooks:
+      post:
+        install: |
+          bin.install_symlink "jenkins-job-cli" => "jj"
+        
