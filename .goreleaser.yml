@@ -4,12 +4,14 @@ project_name: jenkins-job-cli
 before:
   hooks:
     - go mod tidy
+    - ./scripts/completions.sh
 
 builds:
   - env:
       - CGO_ENABLED=0
+    mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.build={{.ShortCommit}}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser -X main.treeState={{ .IsGitDirty }}
     goos:
       - linux
       - windows
@@ -20,13 +22,36 @@ builds:
     binary: jenkins-job-cli
 
 archives:
-  - formats: ["tar.gz"]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - name_template: >-
+      {{- .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end -}}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    builds_info:
+      group: root
+      owner: root
+      mtime: "{{ .CommitDate }}"
     files:
-      - README*
-      - LICENSE*
-      - CHANGELOG*
-    wrap_in_directory: false
+      - src: README.md
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSE.md
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: completions/*
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: "checksums.txt"
@@ -36,10 +61,47 @@ checksum:
 
 changelog:
   sort: asc
+  use: github
+  format: "{{ .SHA }}: {{ .Message }}{{ with .AuthorUsername }} (@{{ . }}){{ end }}"
   filters:
     exclude:
-      - "^docs:"
       - "^test:"
+      - "^test\\("
+      - "^chore: update$"
+      - "^chore: docs$"
+      - "^docs: update$"
+      - "^chore: schema$"
+      - "^chore: typo$"
+      - "^chore: auto-update generated files$"
+      - "^chore: update schema$"
+      - "^chore: schema update$"
+      - "^chore\\(deps\\): "
+      - "^(build|ci): "
+      - "merge conflict"
+      - "merge conflict"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+      - go mod tidy
+  groups:
+    - title: "New Features"
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 100
+    - title: "Security updates"
+      regexp: '^.*?sec(\(.+\))??!?:.+$'
+      order: 150
+    - title: "Bug fixes"
+      regexp: '^.*?(fix|refactor)(\(.+\))??!?:.+$'
+      order: 200
+    - title: "Documentation updates"
+      regexp: ^.*?docs?(\(.+\))??!?:.+$
+      order: 400
+    - title: Other work
+      order: 9999
+
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
 
 release:
   github:
@@ -68,33 +130,17 @@ release:
     jj --help
     ```
 
-# Homebrew Tap 配置
-brews:
-  - name: jenkins-job-cli
-    repository:
+homebrew_casks:
+  - repository:
       owner: jeffzhangc
       name: homebrew-tap
-      branch: main
-      token: "{{ .Env.GITHUB_TOKEN }}"
-    
-    directory: Formula
+    name: jenkins-job-cli
     homepage: "https://github.com/jeffzhangc/jenkins-job-cli"
-    description: "Jenkins job CLI tool"
-    license: "MIT"
-    
-    # 添加多架构支持
-    url_template: "https://github.com/jeffzhangc/jenkins-job-cli/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-
-    install: |
-      bin.install "jenkins-job-cli"
-      bin.install_symlink "jenkins-job-cli" => "jj"
-    
-    test: |
-      system "#{bin}/jenkins-job-cli --version"
-      system "#{bin}/jj --version"
-    
-    caveats: "You can use either 'jenkins-job-cli' or 'jj' command"
-    
-    commit_author:
-      name: goreleaser
-      email: goreleaser@users.noreply.github.com
+    description: jenkins cli , simplified
+    license: MIT
+    completions:
+      bash: "completions/jj.bash"
+      zsh: "completions/jj.zsh"
+      fish: "completions/jj.fish"
+    url:
+      verified: github.com/jeffzhangc/jenkins-job-cli/download
