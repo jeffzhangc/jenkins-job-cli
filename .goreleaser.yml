@@ -57,7 +57,7 @@ checksum:
   name_template: "checksums.txt"
 
 # snapshot:
-  # name_template: "{{ incpatch .Version }}-next"
+# name_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -99,7 +99,6 @@ changelog:
     - title: Other work
       order: 9999
 
-
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
@@ -107,24 +106,24 @@ release:
   github:
     owner: jeffzhangc
     name: jenkins-job-cli
-  
+
   # 简化的发布说明，避免使用可能不存在的变量
   header: |
     ## Release {{ .Tag }}
-    
+
     Jenkins Job CLI tool for managing Jenkins jobs programmatically.
-  
+
   footer: |
     ### Installation
-    
+
     **Using Homebrew:**
     ```bash
     brew install jeffzhangc/tap/jenkins-job-cli
     ```
-    
+
     **Manual installation:**
     Download the binary for your platform from the Assets section below.
-    
+
     ### Usage
     ```bash
     jj --help
@@ -144,3 +143,7 @@ homebrew_casks:
       fish: "completions/jj.fish"
     url:
       verified: github.com/jeffzhangc/jenkins-job-cli/download
+    uninstall:
+      trash:
+        - "~/.jj"
+    caveats: "jj help"
