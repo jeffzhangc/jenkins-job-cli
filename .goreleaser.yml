@@ -1,4 +1,5 @@
 project_name: jenkins-job-cli
+version: 2
 
 before:
   hooks:
@@ -81,6 +82,9 @@ brews:
     description: "Jenkins job CLI tool"
     license: "MIT"
     
+    # 添加多架构支持
+    url_template: "https://github.com/jeffzhangc/jenkins-job-cli/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+
     install: |
       bin.install "jenkins-job-cli"
       bin.install_symlink "jenkins-job-cli" => "jj"
