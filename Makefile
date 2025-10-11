@@ -43,7 +43,7 @@ image:
 install: build
 	@echo "Installing $(NAME) to /usr/local/bin/..."
 	sudo cp $(NAME) /usr/local/bin/
-	sudo cp jj /usr/local/bin/  # 同时安装 jj 命令
+	sudo cp /usr/local/bin/$(NAME) /usr/local/bin/jj # 同时安装 jj 命令
 	@echo "Installation completed. You can use 'jenkins-job-cli' or 'jj'"
 
 # Test GoReleaser configuration

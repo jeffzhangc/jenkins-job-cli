@@ -141,14 +141,10 @@ homebrew_casks:
       bash: "completions/jj.bash"
       zsh: "completions/jj.zsh"
       fish: "completions/jj.fish"
+    binary: "jj"
     url:
       verified: github.com/jeffzhangc/jenkins-job-cli/download
     uninstall:
       trash:
         - "~/.jj"
-    caveats: "jj help"
-    hooks:
-      post:
-        install: |
-          bin.install_symlink "jenkins-job-cli" => "jj"
-        
+    caveats: "jj help"        
