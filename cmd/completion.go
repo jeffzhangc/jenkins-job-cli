@@ -1,89 +1,179 @@
 package cmd
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"io/ioutil"
+	"log"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 func init() {
-	// 创建自定义的 completion 命令
+	// completionCmd represents the completion command
 	var completionCmd = &cobra.Command{
-		Use:   "completion [bash|zsh|fish|powershell]",
-		Short: "Generate shell completion scripts",
-		Long: `Generate shell completion scripts for jj.
+		Use:   "completion SHELL",
+		Short: "Create a bash/zsh completion script",
+		Long: `To load completion run
 
-This command generates completion scripts for various shells. After generating,
-you need to source the file or add it to your shell's startup configuration.
+. <(bitbucket completion)
 
-Installation Instructions:
+To configure your bash shell to load completions for each session add to your bashrc
 
-Bash (Linux/macOS):
-  # Generate and save the completion script
-  jj completion bash > ~/.jj-completion.bash
-  
-  # Add to your bashrc
-  echo "source ~/.jj-completion.bash" >> ~/.bashrc
-  
-  # Reload your current shell
-  source ~/.bashrc
+# ~/.bashrc or ~/.profile
+. <(bitbucket completion)
+`,
+	}
+	var completionCmdBash = &cobra.Command{
+		Use:   "bash",
+		Short: "Generates bash completion scripts",
+		Long: `To load completion run
 
-  # Alternative: system-wide installation (Linux)
-  sudo jj completion bash > /etc/bash_completion.d/jj
+. <(bitbucket completion)
 
-Bash (macOS with Homebrew):
-  # If installed via Homebrew, completion might be automatically installed
-  brew install bash-completion
+To configure your bash shell to load completions for each session add to your bashrc
 
-Zsh:
-  # Generate and save the completion script
-  jj completion zsh > ~/.jj-completion.zsh
-  
-  # Add to your zshrc
-  echo "source ~/.jj-completion.zsh" >> ~/.zshrc
-  
-  # Reload your current shell
-  source ~/.zshrc
-
-  # Alternative: use the function path
-  jj completion zsh > "${fpath[1]}/_jj"
-
-Fish:
-  # Generate and save the completion script
-  jj completion fish > ~/.config/fish/completions/jj.fish
-  
-  # Reload your current shell
-  exec fish
-
-PowerShell:
-  # Generate and execute immediately
-  jj completion powershell | Out-String | Invoke-Expression
-  
-  # To persist across sessions, add to your profile
-  jj completion powershell > $PROFILE
-  
-  # Or create a separate file and source it
-  jj completion powershell > ~/.jj-completion.ps1
-  Add-Content $PROFILE "~/.jj-completion.ps1"
-
-After installation, restart your shell or source the configuration file.
-You can then use tab completion for hosts, groups, and commands.`,
-		DisableFlagsInUseLine: true,
-		ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
-		Args:                  cobra.ExactValidArgs(1),
+# ~/.bashrc or ~/.profile
+. <(bitbucket completion)
+`,
 		Run: func(cmd *cobra.Command, args []string) {
-			switch args[0] {
-			case "bash":
-				cmd.Root().GenBashCompletion(os.Stdout)
-			case "zsh":
-				cmd.Root().GenZshCompletion(os.Stdout)
-			case "fish":
-				cmd.Root().GenFishCompletion(os.Stdout, true)
-			case "powershell":
-				cmd.Root().GenPowerShellCompletion(os.Stdout)
-			}
+			rootCmd.GenBashCompletion(os.Stdout)
 		},
 	}
+	var completionCmdZsh = &cobra.Command{
+		Use:   "zsh",
+		Short: "Generates zsh completion scripts",
+		Long: `To load completion run
 
+. <(bitbucket completion zsh)
+
+To configure your bash shell to load completions for each session add to your bashrc
+
+# ~/.bashrc or ~/.profile
+. <(bitbucket completion)
+`,
+		Run: func(cmd *cobra.Command, args []string) {
+			runCompletionZsh(os.Stdout, "", rootCmd)
+		},
+	}
+	var completionCmdCheck = &cobra.Command{
+		Use:   "check",
+		Short: "Checks your OS completions settings",
+		Long:  `Checks your OS completions settings`,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkCompletion()
+		},
+	}
+	completionCmd.AddCommand(completionCmdBash)
+	completionCmd.AddCommand(completionCmdZsh)
+	completionCmd.AddCommand(completionCmdCheck)
 	rootCmd.AddCommand(completionCmd)
+}
+
+func checkCompletion() {
+	shell := os.Getenv("SHELL")
+	if strings.Contains(shell, "zsh") {
+		checkZsh()
+		return
+	}
+	if strings.Contains(shell, "bash") {
+		checkBash(shell)
+		return
+	}
+	fmt.Printf("shell '%s' is not supported yet", shell)
+
+}
+func checkBash(shell string) {
+	fmt.Println("==> current shell is bash - OK")
+	cmd := exec.Command(shell, "--version")
+	verInfoB, err := cmd.Output()
+	if err != nil {
+		panic(err)
+	}
+	verInfo := string(verInfoB)
+	i := strings.Index(verInfo, "version ") + 8
+	ver := verInfo[i : i+3]
+	verA := strings.Split(verInfo[i:i+3], ".")
+	if verA[0] > "4" || (verA[0] == "4" && verA[1] >= "1") {
+		fmt.Printf("==> bash version is %s - OK\n", ver)
+	} else {
+		fmt.Printf("==> bash version is %s - FAILED\n", ver)
+		fmt.Printf(
+			`
+Error: completion script doesn't work correctly with Bash %s. It requires bash-completion v2 and Bash 4.1+. 
+Thus, to be able to correctly use completion on macOS, you have to install and use Bash 4.1+. The following instruction helps you with it:
+https://itnext.io/upgrading-bash-on-macos-7138bd1066ba
+`, ver)
+		return
+	}
+	fmt.Println("Checked. After reloading your shell, jj autocompletion should be working.")
+}
+
+func checkZsh() {
+	homeDir, _ := os.UserHomeDir()
+	fmt.Println("==> current shell is zsh - OK")
+	zshrc, err := ioutil.ReadFile(homeDir + "/.zshrc")
+	scanner := bufio.NewScanner(bytes.NewReader(zshrc))
+	var buffer strings.Builder
+	for scanner.Scan() {
+		text := scanner.Text()
+		trimText := strings.TrimSpace(text)
+		if len(trimText) > 0 && trimText[:1] != "#" {
+			buffer.WriteString(text)
+			buffer.WriteString("\n")
+		}
+	}
+	if err != nil {
+		fmt.Println(
+			`
+Error: ~/.zshrc file was not found. As the next step, please create file and add the following line:
+  source <(jj completion zsh)`)
+		return
+	}
+	fmt.Println("==> file ~/.zshrc is exist - OK")
+	if !strings.Contains(buffer.String(), "jj completion zsh") {
+		fmt.Println("==> completion script has not been added - FAILED")
+		fmt.Println(
+			`
+Error: ~/.zshrc should have line with jj completion script for the shell. Make sure, that the following line has been added the the ~/.zshrc file:
+    source <(jj completion zsh)`)
+		return
+	}
+	fmt.Println("==> completion script has been added - OK")
+	cmd := exec.Command("zsh", "-c", "source ~/.zshrc; compdef")
+	stderr, err := cmd.StderrPipe()
+	log.SetOutput(os.Stderr)
+	if err := cmd.Start(); err != nil {
+		log.Fatal(err)
+	}
+	rsp, _ := ioutil.ReadAll(stderr)
+	if strings.Contains(string(rsp), "not found") {
+		compinitPos := strings.Index(buffer.String(), "autoload -Uz compinit")
+		scriptPos := strings.Index(buffer.String(), "jj completion zsh")
+		if compinitPos > -1 && compinitPos > scriptPos {
+			fmt.Println("==> the initialized compdef script was added incorrectly - FAILED")
+			fmt.Println(
+				`
+Error: the initialized compdef script was added incorrectly. Move the following to the beginning of your ~/.zshrc file
+    autoload -Uz compinit
+    compinit`)
+			return
+		} else {
+			fmt.Println("==> compdef functions is not exist - FAILED")
+			fmt.Println(
+				`
+Error: current shell does not have required 'compdef' function. Add the following to the beginning of your ~/.zshrc file:
+    autoload -Uz compinit
+    compinit`)
+			return
+		}
+
+	}
+	fmt.Println("==> compdef functions is exist - OK")
+
+	fmt.Println("Checked. After reloading your shell, jj autocompletion should be working.")
 }
