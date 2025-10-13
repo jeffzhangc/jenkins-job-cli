@@ -54,7 +54,7 @@ __jj_get_resource()
 __jj_custom_func() {
 
 	case ${last_command} in
-        jj_get | jj_run | jj_delete | jj_stop)
+        jj_get | jj_run | jj_delete | jj_stop | jj_console)
             __jj_get_resource
             return
             ;;

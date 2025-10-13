@@ -14,10 +14,10 @@ clean:
 # Build for current platform
 build:
 	go mod tidy
-	CGO_ENABLED=0 go build -tags release -ldflags $(LD_FLAGS) -o $(NAME)
+	CGO_ENABLED=0 go build -tags release -ldflags $(LD_FLAGS) -o jenkins-job-cli
 	cp $(NAME) jj  # 创建符号链接
+	@bash ./scripts/completions.sh
 
-# Development build
 build-dev:
 	go build -ldflags "-w -X main.version=$(VERSION)-dev -X main.build=$(BUILD) -extldflags=$(EXT_LD_FLAGS)"
 	cp $(NAME) jj  # 创建符号链接
@@ -39,15 +39,33 @@ build-all: clean
 image:
 	docker build -t $(NAME) -f Dockerfile .
 
-# Install to local system
-install: build
-	@echo "Installing $(NAME) to /usr/local/bin/..."
-	sudo cp $(NAME) /usr/local/bin/
-	sudo cp /usr/local/bin/$(NAME) /usr/local/bin/jj # 同时安装 jj 命令
-	@echo "Installation completed. You can use 'jenkins-job-cli' or 'jj'"
+# 安装补全文件到 Homebrew 目录
+install-completions: build
+	@echo "Installing shell completions..."
+	$(eval HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo "/usr/local"))
+	@echo "Using prefix: $(HOMEBREW_PREFIX)"
+	
+	install -d $(HOMEBREW_PREFIX)/etc/bash_completion.d/
+	install -m 644 completions/jj.bash $(HOMEBREW_PREFIX)/etc/bash_completion.d/jj
+	
+	install -d $(HOMEBREW_PREFIX)/share/zsh/site-functions/
+	install -m 644 completions/jj.zsh $(HOMEBREW_PREFIX)/share/zsh/site-functions/_jj
+	
+	install -d $(HOMEBREW_PREFIX)/share/fish/vendor_completions.d/
+	install -m 644 completions/jj.fish $(HOMEBREW_PREFIX)/share/fish/vendor_completions.d/jj.fish
+	
+	@echo "Completions installed successfully!"
 
-# Test GoReleaser configuration
-goreleaser-check:
+# Install to local system
+install: build install-completions
+	@echo "Installing $(NAME) to /usr/local/bin/..."
+	@echo "Installation completed. You can use 'jenkins-job-cli' or 'jj'"
+	@echo "Installation completed."
+
+
+
+# 使用 GoReleaser 发布
+goreleaser-release: clean
 	@command -v goreleaser >/dev/null 2>&1 || { \
 		echo "Error: goreleaser is required but not installed."; \
 		echo "Install it from: https://goreleaser.com/install/"; \

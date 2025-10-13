@@ -10,3 +10,4 @@ jenkins-job-cli
 
 dist/
 completions/
+jj

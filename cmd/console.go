@@ -17,6 +17,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,8 +36,9 @@ func init() {
 		ENV      string
 	)
 	var consoleCmd = &cobra.Command{
-		Use:   "console [job]",
-		Short: "Display running jobs or latest job console output",
+		Use:               "console [job]",
+		Short:             "Display running jobs or latest job console output",
+		ValidArgsFunction: consoleValidJobArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			env := jj.Init(ENV)
 			// 列出正在运行的 jobs
@@ -69,10 +71,16 @@ func init() {
 			buildNum := jobInfo.LastBuild.Number
 			if runningFlag {
 				buildNum = runningBuild.BuildNum
+			} else {
+				lastBuild, _ := jj.GetLastSuccessfulBuildInfo(env, jobName)
+				if lastBuild != nil {
+					buildNum, _ = strconv.Atoi(lastBuild.Id)
+				}
 			}
 			if buildNum == 0 {
 				return fmt.Errorf("job '%s' has no build yet", jobName)
 			}
+
 			output, _, err2 := jj.Console(env, jobName, buildNum, "0")
 			if err2 != nil {
 				return fmt.Errorf("get console output failed: %v", err2)
@@ -101,6 +109,34 @@ func init() {
 	consoleCmd.Flags().StringVarP(&ENV, "name", "n", "", "current Jenkins name")
 
 	rootCmd.AddCommand(consoleCmd)
+}
+
+// Job 名称补全函数
+func consoleValidJobArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	// 从 flag 获取环境名称
+	envName, _ := cmd.Flags().GetString("name")
+	if envName == "" {
+		// 如果没有指定环境，使用默认环境
+		envName = "default" // 或者从配置中获取默认环境
+	}
+
+	env := jj.Init(envName)
+
+	jobs := jj.GetBundle(env).Views
+
+	// 过滤以 toComplete 开头的 job 名称
+	var suggestions []string
+	for _, job := range jobs {
+		if strings.HasPrefix(job.Name, toComplete) {
+			suggestions = append(suggestions, job.Name)
+		}
+	}
+
+	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
 
 // 优化打印函数，缓存英文输出，所有列宽对齐

@@ -128,7 +128,6 @@ release:
     ```bash
     jj --help
     ```
-
 homebrew_casks:
   - repository:
       owner: jeffzhangc
