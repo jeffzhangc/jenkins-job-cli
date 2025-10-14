@@ -21,8 +21,9 @@ sudo chmod +x /usr/local/bin/jj
 #### OS X brew
 
 ```bash
-brew tap gocruncher/tap
-brew install jj
+# brew tap gocruncher/tap
+# brew install jj
+brew install jeffzhangc/tap/jenkins-job-cli
 ```
 
 #### OS X bash
