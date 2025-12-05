@@ -64,6 +64,7 @@ You can filter by environment and limit the number of results.`,
   jj history list -e prod               # List commands in prod environment
   jj history list -l 10                 # List last 10 commands
   jj history list -f json               # Output in JSON format`,
+		ValidArgsFunction: completeAliases,
 		Run: func(cmd *cobra.Command, args []string) {
 			listQuickCmds()
 		},
@@ -73,9 +74,10 @@ You can filter by environment and limit the number of results.`,
 
 	// ========== history run 命令 ==========
 	var historyRunCmd = &cobra.Command{
-		Use:     "run",
-		Aliases: []string{"r", "exec"},
-		Short:   "Run saved quick command by alias",
+		Use:               "run",
+		Aliases:           []string{"r", "exec"},
+		ValidArgsFunction: completeAliases,
+		Short:             "Run saved quick command by alias",
 		Long: `Run saved quick command by alias.
 You can run multiple commands by providing multiple aliases.`,
 		Example: `  jj history run myjob_quick            # Run single command
@@ -92,11 +94,12 @@ You can run multiple commands by providing multiple aliases.`,
 
 	// ========== history view 命令 ==========
 	var historyViewCmd = &cobra.Command{
-		Use:     "view",
-		Aliases: []string{"v", "show", "info"},
-		Short:   "View details of saved quick commands",
-		Long:    "View detailed information of saved quick commands.",
-		Args:    cobra.MinimumNArgs(1),
+		Use:               "view",
+		Aliases:           []string{"v", "show", "info"},
+		Short:             "View details of saved quick commands",
+		Long:              "View detailed information of saved quick commands.",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeAliases,
 		Example: `  jj history view alias1              # View single command
   jj history view alias1 alias2       # View multiple commands
   jj history view -f json alias1      # Output in JSON format`,
@@ -126,6 +129,7 @@ You can run multiple commands by providing multiple aliases.`,
 				deleteQuickCmd(alias)
 			}
 		},
+		ValidArgsFunction: completeAliases,
 	}
 	historyDeleteCmd.Flags().BoolVarP(&forceFlag, "force", "", false, "Force delete without confirmation")
 	historyCmd.AddCommand(historyDeleteCmd)
@@ -158,6 +162,8 @@ You can run multiple commands by providing multiple aliases.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			searchQuickCmds(args[0])
 		},
+		// 添加补全
+		ValidArgsFunction: completeAliases,
 	}
 	historyCmd.AddCommand(historySearchCmd)
 
@@ -199,6 +205,45 @@ You can run multiple commands by providing multiple aliases.`,
 
 	// 添加到根命令
 	rootCmd.AddCommand(historyCmd)
+}
+
+// 补全函数：为所有需要别名的命令提供补全
+func completeAliases(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// 获取所有可能的别名
+	allAliases := getAllAliases(toComplete)
+
+	// 创建已使用别名的集合
+	usedAliases := make(map[string]bool)
+	for _, arg := range args {
+		usedAliases[arg] = true
+	}
+
+	// 过滤掉已使用的别名
+	var availableAliases []string
+	for _, alias := range allAliases {
+		// 跳过已经在 args 中的别名
+		if !usedAliases[alias] {
+			// 同时确保别名以 toComplete 开头（已经在 getAllAliases 中处理）
+			availableAliases = append(availableAliases, alias)
+		}
+	}
+
+	return availableAliases, cobra.ShellCompDirectiveNoFileComp
+}
+
+// 获取所有别名
+func getAllAliases(prefix string) []string {
+	history := jj.GetQuickRunCmdList()
+
+	var aliases []string
+	for _, cmd := range history {
+		// 先检查前缀匹配
+		if prefix == "" || strings.HasPrefix(cmd.Alias, prefix) {
+			aliases = append(aliases, cmd.Alias)
+		}
+	}
+
+	return aliases
 }
 
 // ========== 实现函数 ==========
