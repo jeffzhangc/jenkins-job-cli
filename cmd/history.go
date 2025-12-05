@@ -50,8 +50,7 @@ func init() {
 	}
 
 	// 全局标志
-	historyCmd.PersistentFlags().StringVarP(&envFilter, "env", "e", "", "Filter by environment")
-	historyCmd.PersistentFlags().StringVarP(&formatFlag, "format", "f", "table", "Output format (table, json, yaml)")
+	historyCmd.PersistentFlags().StringVarP(&formatFlag, "format", "", "table", "Output format (table, json, yaml)")
 	historyCmd.PersistentFlags().IntVarP(&limitFlag, "limit", "l", 0, "Limit number of results")
 
 	// ========== history list 命令 ==========
@@ -128,7 +127,7 @@ You can run multiple commands by providing multiple aliases.`,
 			}
 		},
 	}
-	historyDeleteCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Force delete without confirmation")
+	historyDeleteCmd.Flags().BoolVarP(&forceFlag, "force", "", false, "Force delete without confirmation")
 	historyCmd.AddCommand(historyDeleteCmd)
 
 	// ========== history clear 命令 ==========
@@ -143,7 +142,7 @@ You can run multiple commands by providing multiple aliases.`,
 			clearAllHistory()
 		},
 	}
-	historyClearCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Force clear without confirmation")
+	historyClearCmd.Flags().BoolVarP(&forceFlag, "force", "", false, "Force clear without confirmation")
 	historyCmd.AddCommand(historyClearCmd)
 
 	// ========== history search 命令 ==========
@@ -179,7 +178,7 @@ You can run multiple commands by providing multiple aliases.`,
 			}
 		},
 	}
-	historyExportCmd.Flags().StringVarP(&formatFlag, "format", "f", "yaml", "Export format (json, yaml, csv)")
+	historyExportCmd.Flags().StringVarP(&formatFlag, "format", "", "yaml", "Export format (json, yaml, csv)")
 	historyCmd.AddCommand(historyExportCmd)
 
 	// ========== history import 命令 ==========
