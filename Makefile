@@ -58,7 +58,9 @@ install-completions: build
 
 # Install to local system
 install: build install-completions
-	@echo "Installing $(NAME) to /usr/local/bin/..."
+	@echo "Installing $(NAME) to $(HOMEBREW_PREFIX)/bin/..."
+	sudo cp $(NAME) $(HOMEBREW_PREFIX)/bin/
+	sudo ln -sf $(HOMEBREW_PREFIX)/bin/$(NAME) $(HOMEBREW_PREFIX)/bin/jj
 	@echo "Installation completed. You can use 'jenkins-job-cli' or 'jj'"
 	@echo "Installation completed."
 
@@ -101,7 +103,7 @@ help:
 	@echo "  release            - Release with GoReleaser + Homebrew tap (main target)"
 	@echo "  goreleaser-snapshot- Test build with GoReleaser"
 	@echo "  goreleaser-check   - Check GoReleaser configuration"
-	@echo "  install            - Install to /usr/local/bin/ (both jenkins-job-cli and jj)"
+	@echo "  install            - Install to $(HOMEBREW_PREFIX)/bin/ (both jenkins-job-cli and jj)"
 	@echo "  clean              - Clean build artifacts"
 
 .PHONY: all clean build build-dev build-all image install goreleaser-check goreleaser-snapshot release goreleaser-init help

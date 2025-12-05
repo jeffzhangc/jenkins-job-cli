@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ var Debug = false
 
 const cacheFile = "cache"
 const configFile = "config.yaml"
+const historyFile = "history.yaml"
 
 var config Config
 var bundles []*Bundle
@@ -212,8 +214,18 @@ type GitParameterDefinition struct {
 	Class string `json:"_class"`
 }
 
+type QuickRunCmdDefinition struct {
+	Alias        string `json:"alias" yaml:"alias"`
+	JobName      string `json:"jobName" yaml:"jobName"`
+	Cmd          string `json:"cmd" yaml:"cmd"`
+	Executimes   int    `json:"executimes" yaml:"executimes"`
+	LastExecTime int64  `json:"lastExecTime" yaml:"lastExecTime"`
+	Env          string `json:"env" yaml:"env"`
+	LastJobUrl   string `json:"lastJobUrl" yaml:"lastJobUrl"`
+}
+
 func initConfig() {
-	data, err := ioutil.ReadFile(homeDir + configFile)
+	data, err := os.ReadFile(homeDir + configFile)
 	if err != nil {
 		return
 	}
@@ -258,11 +270,14 @@ func setViews(env Env, views []View) {
 
 func initBundle(env Env) {
 	var bundle Bundle
-	cachebin, err := ioutil.ReadFile(homeDir + cacheFile + "." + string(env.Name))
-	err = json.Unmarshal(cachebin, &bundle)
+	cachebin, err := os.ReadFile(homeDir + cacheFile + "." + string(env.Name))
 	if err != nil {
 		fetchBundle(env, false)
 	} else {
+		err = json.Unmarshal(cachebin, &bundle)
+		if err != nil {
+			fmt.Println("failed to Unmarshal cache info, ", err.Error())
+		}
 		mutex.Lock()
 		defer mutex.Unlock()
 		bundles = append(bundles, &bundle)
@@ -313,14 +328,15 @@ func updateCache(env Env, bundle *Bundle) {
 	cachebin, err := json.Marshal(bundle)
 	if err == nil {
 		path := homeDir + cacheFile + "." + string(env.Name)
-		ioutil.WriteFile(path, cachebin, 0644)
+		os.WriteFile(path, cachebin, 0644)
 	} else {
 		fmt.Println("failed to Marshal cache info, ", err.Error())
 	}
 }
-func reqPOST(env Env, method, path string, body []byte) (int, []byte, map[string][]string, error) {
-	return req(env, method, path, body)
-}
+
+//	func reqPOST(env Env, method, path string, body []byte) (int, []byte, map[string][]string, error) {
+//		return req(env, method, path, body)
+//	}
 func req(env Env, method, path string, body []byte) (int, []byte, map[string][]string, error) {
 	base_url := env.Url
 	if base_url[len(base_url)-1:] != "/" {
@@ -346,7 +362,7 @@ func req(env Env, method, path string, body []byte) (int, []byte, map[string][]s
 		return 0, nil, nil, err
 	}
 	defer response.Body.Close()
-	contents, err := ioutil.ReadAll(response.Body)
+	contents, err := io.ReadAll(response.Body)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -355,4 +371,50 @@ func req(env Env, method, path string, body []byte) (int, []byte, map[string][]s
 		fmt.Println("req: ", url, "\t data: ", string(body), "type:", response.Header.Get("Content-Type"), "\n rsp: ", string(contents))
 	}
 	return response.StatusCode, contents, response.Header, nil
+}
+
+func GetQuickRunCmdList() []QuickRunCmdDefinition {
+	fileName := path.Join(homeDir, historyFile)
+	// Read the file，yaml 转换为 实体列表
+	quickRunCmdList := []QuickRunCmdDefinition{}
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return quickRunCmdList
+	}
+	err = yaml.Unmarshal(data, &quickRunCmdList)
+	if err != nil {
+		return quickRunCmdList
+	}
+
+	return quickRunCmdList
+}
+
+func AddQuickRunCmd(quickRunCmd QuickRunCmdDefinition) {
+	quickRunCmdList := GetQuickRunCmdList()
+	// check alias 是否有 重复的
+	for _, cmd := range quickRunCmdList {
+		if cmd.Alias == quickRunCmd.Alias {
+			fmt.Println("alias already exists")
+			// 打印手动保存位置 和 内容
+			fmt.Println("please modify the alias then manually add to " + path.Join(homeDir, historyFile) + " with content:")
+			yaml.NewEncoder(os.Stdout).Encode(quickRunCmd)
+			return
+		}
+	}
+	quickRunCmdList = append(quickRunCmdList, quickRunCmd)
+	data, err := yaml.Marshal(&quickRunCmdList)
+	if err != nil {
+		fmt.Println("failed to Marshal quickRunCmdList, ", err.Error())
+		return
+	}
+	os.WriteFile(path.Join(homeDir, historyFile), data, 0644)
+}
+
+func SaveAllHistory(history []QuickRunCmdDefinition) {
+	data, err := yaml.Marshal(&history)
+	if err != nil {
+		fmt.Println("failed to Marshal quickRunCmdList, ", err.Error())
+		return
+	}
+	os.WriteFile(path.Join(homeDir, historyFile), data, 0644)
 }

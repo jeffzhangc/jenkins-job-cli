@@ -71,7 +71,7 @@ func init() {
 	}
 	inputArgs = arguments{args: make([]string, 0, 20)}
 	runCmd.Flags().StringArrayVarP(&inputArgs.args, "arg", "a", []string{}, "input arguments of a job. Usage: -a key=val")
-	runCmd.Flags().StringVarP(&ENV, "name", "n", "", "current Jenkins name")
+	runCmd.Flags().StringVarP(&ENV, "name", "n", "", "current Jenkins env name")
 	runCmd.SetUsageTemplate(usageTamplate)
 	rootCmd.AddCommand(runCmd)
 }
@@ -214,7 +214,7 @@ func runJob(name string) {
 		curSt = st{}
 	}
 	fmt.Println(chalk.Green.Color("Done"))
-
+	stdinListener.Close()
 	printQuickRunJobByID(env, name, number)
 	return
 }
@@ -625,6 +625,8 @@ func printQuickRunJobByID(env jj.Env, jobName string, jobNum int) {
 
 	quickCmd := []string{
 		"jj run " + jobName,
+		"-n",
+		string(env.Name),
 	}
 
 	if len(buildInfo.Actions) > 0 {
@@ -641,5 +643,9 @@ func printQuickRunJobByID(env jj.Env, jobName string, jobNum int) {
 		}
 	}
 
-	fmt.Printf("\n\nquick commands jobName:%s, historyJobNum:%d \n%s\n", jobName, jobNum, strings.Join(quickCmd, " "))
+	quickCmdStr := strings.Join(quickCmd, " ")
+	fmt.Printf("\n\nquick commands jobName:%s, historyJobNum:%d \n%s\n", jobName, jobNum, quickCmdStr)
+	if len(inputArgs.args) == 0 {
+		askToSaveQuickCmd(quickCmdStr, jobName, jobNum, env)
+	}
 }
