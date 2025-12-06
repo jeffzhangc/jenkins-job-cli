@@ -4,7 +4,7 @@ project_name: jenkins-job-cli
 before:
   hooks:
     - go mod tidy
-    - ./scripts/completions.sh
+    - chmod +x ./scripts/completions.sh && ./scripts/completions.sh
 
 builds:
   - env:
@@ -42,12 +42,30 @@ archives:
           owner: root
           group: root
           mtime: "{{ .CommitDate }}"
+      - src: README_CN.md
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
       - src: LICENSE
         info:
           owner: root
           group: root
           mtime: "{{ .CommitDate }}"
-      - src: completions/*
+      - src: completions/jj.bash
+        dst: completions/jj.bash
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: completions/jj.zsh
+        dst: completions/jj.zsh
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: completions/jj.fish
+        dst: completions/jj.fish
         info:
           owner: root
           group: root
@@ -134,7 +152,7 @@ homebrew_casks:
       name: homebrew-tap
     name: jenkins-job-cli
     homepage: "https://github.com/jeffzhangc/jenkins-job-cli"
-    description: jenkins cli , simplified
+    description: "Jenkins CLI tool for managing Jenkins jobs programmatically"
     license: MIT
     completions:
       bash: "completions/jj.bash"
@@ -146,22 +164,28 @@ homebrew_casks:
     uninstall:
       trash:
         - "~/.jj"
-    caveats: "jj help"
+    caveats: |
+      To use the CLI, run:
+        jj --help
+      
+      To enable shell completions:
+        echo 'source <(jj completion zsh)' >>~/.zshrc  # for zsh
+        echo 'source <(jj completion bash)' >>~/.bashrc # for bash
     hooks:
       post:
         install: |
           brew_prefix = `brew --prefix`.chomp
-      target = "#{brew_prefix}/bin/jj"
-      binary_path = "#{staged_path}/jenkins-job-cli"
-      
-      # 移除隔离属性
-      system_command '/usr/bin/xattr',
-                     args: ['-d', 'com.apple.quarantine', binary_path]
-      
-      # 创建符号链接
-      system_command '/bin/ln',
-                     args: ['-sf', binary_path, target],
-                     sudo: true
+          target = "#{brew_prefix}/bin/jj"
+          binary_path = "#{staged_path}/jenkins-job-cli"
+          
+          # Remove quarantine attribute
+          system_command '/usr/bin/xattr',
+                         args: ['-d', 'com.apple.quarantine', binary_path]
+          
+          # Create symlink
+          system_command '/bin/ln',
+                         args: ['-sf', binary_path, target],
+                         sudo: true
 
 # brews:
 #   - name: jenkins-job-cli
