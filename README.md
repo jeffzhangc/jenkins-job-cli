@@ -95,13 +95,137 @@ jj console
 jj console app-xxx
 ```
 
-## Futures
+## History Management
 
-- cancellation job (Ctrl+C key)
-- resize of the output (just press enter key)
-- output of child jobs
-- show console info
-- show quick run history job for jj command with params
+The `jj history` command allows you to save, manage, and quickly rerun frequently used Jenkins job commands with custom aliases. This feature helps you avoid typing long commands repeatedly.
+
+### Save Quick Commands
+
+After running a job, you'll be prompted to save the command with an alias. You can also save commands manually by running them normally - the tool will ask if you want to save them.
+
+### List Saved Commands
+
+```bash
+# List all saved quick commands
+jj history list
+
+# List commands in a specific environment
+jj history list -e prod
+
+# Limit the number of results
+jj history list -l 10
+
+# Show all details including full command
+jj history list -a
+
+# Output in different formats
+jj history list -f json
+jj history list -f yaml
+```
+
+### Run Saved Commands
+
+```bash
+# Run a saved command by alias
+jj history run myjob_quick
+
+# Run multiple commands at once
+jj history run alias1 alias2 alias3
+
+# Force run without confirmation
+jj history run -f myjob_quick
+```
+
+### View Command Details
+
+```bash
+# View details of a saved command
+jj history view alias1
+
+# View multiple commands
+jj history view alias1 alias2
+
+# Output in JSON format
+jj history view -f json alias1
+```
+
+### Search Commands
+
+```bash
+# Search for commands by keyword
+jj history search "prod"
+
+# Search in a specific environment
+jj history search -e dev "deploy"
+
+# Output in JSON format
+jj history search -f json "job"
+```
+
+### Delete Commands
+
+```bash
+# Delete a saved command
+jj history delete alias1
+
+# Delete multiple commands
+jj history delete alias1 alias2
+
+# Force delete without confirmation
+jj history delete -f alias1
+```
+
+### Clear All History
+
+```bash
+# Clear all saved commands (with confirmation)
+jj history clear
+
+# Force clear without confirmation
+jj history clear -f
+```
+
+### Export and Import
+
+```bash
+# Export history to a file
+jj history export history.json
+jj history export history.yaml
+
+# Export specific environment
+jj history export -e prod prod.yaml
+
+# Import history from a file
+jj history import backup.yaml
+
+# Merge instead of replace when importing
+jj history import -m backup.yaml
+```
+
+### History Command Aliases
+
+- `history` / `hist` / `h` - Main history command
+- `list` / `ls` / `l` - List commands
+- `run` / `r` / `exec` - Run commands
+- `view` / `v` / `show` / `info` - View details
+- `delete` / `del` / `rm` / `remove` - Delete commands
+- `clear` / `clean` / `clr` - Clear all
+- `search` / `s` / `find` / `grep` - Search commands
+- `export` / `exp` / `save` - Export history
+- `import` / `imp` / `load` - Import history
+
+## Features
+
+- ✅ Run Jenkins jobs from command line
+- ✅ Manage multiple Jenkins instances
+- ✅ Save and rerun frequently used commands with aliases
+- ✅ Search and manage command history
+- ✅ Export/import command history
+- ✅ Job cancellation (Ctrl+C key)
+- ✅ Resize output (press enter key)
+- ✅ Output of child jobs
+- ✅ Show console info
+- ✅ Shell autocompletion support
 
 ## Useful packages
 

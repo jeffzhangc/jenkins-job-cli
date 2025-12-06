@@ -150,14 +150,18 @@ homebrew_casks:
     hooks:
       post:
         install: |
-          target = if Hardware::CPU.arm?
-            '/opt/homebrew/bin/jj'
-          else
-            '/usr/local/bin/jj'
-          end
-          system_command '/bin/ln',
-                        args: ['-sf', "#{staged_path}/jenkins-job-cli", target],
-                        sudo: true
+          brew_prefix = `brew --prefix`.chomp
+      target = "#{brew_prefix}/bin/jj"
+      binary_path = "#{staged_path}/jenkins-job-cli"
+      
+      # 移除隔离属性
+      system_command '/usr/bin/xattr',
+                     args: ['-d', 'com.apple.quarantine', binary_path]
+      
+      # 创建符号链接
+      system_command '/bin/ln',
+                     args: ['-sf', binary_path, target],
+                     sudo: true
 
 # brews:
 #   - name: jenkins-job-cli

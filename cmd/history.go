@@ -29,11 +29,11 @@ history clear  清空历史记录
 */
 var (
 	// 全局标志
-	envFilter  string
-	forceFlag  bool
-	limitFlag  int
-	allFlag    bool
-	formatFlag string // 输出格式：table, json, yaml
+	forceFlag        bool
+	limitFlag        int
+	allFlag          bool
+	formatFlag       string // 输出格式：table, json, yaml
+	exportFormatFlag string // export 命令的格式：json, yaml, csv
 )
 
 func init() {
@@ -50,8 +50,16 @@ func init() {
 	}
 
 	// 全局标志
-	historyCmd.PersistentFlags().StringVarP(&formatFlag, "format", "", "table", "Output format (table, json, yaml)")
+	historyCmd.PersistentFlags().StringVar(&formatFlag, "format", "table", "Output format (table, json, yaml)")
 	historyCmd.PersistentFlags().IntVarP(&limitFlag, "limit", "l", 0, "Limit number of results")
+
+	// 为 --format 添加自动补全
+	formatFlagLookup := historyCmd.PersistentFlags().Lookup("format")
+	if formatFlagLookup != nil {
+		formatFlagLookup.Annotations = map[string][]string{
+			cobra.BashCompCustom: {"__jj_format_completion"},
+		}
+	}
 
 	// ========== history list 命令 ==========
 	var historyListCmd = &cobra.Command{
@@ -59,11 +67,10 @@ func init() {
 		Aliases: []string{"ls", "l"},
 		Short:   "List saved quick commands",
 		Long: `List all saved quick commands.
-You can filter by environment and limit the number of results.`,
+You can limit the number of results.`,
 		Example: `  jj history list                      # List all commands
-  jj history list -e prod               # List commands in prod environment
   jj history list -l 10                 # List last 10 commands
-  jj history list -f json               # Output in JSON format`,
+  jj history list --format=json               # Output in JSON format`,
 		ValidArgsFunction: completeAliases,
 		Run: func(cmd *cobra.Command, args []string) {
 			listQuickCmds()
@@ -81,8 +88,7 @@ You can filter by environment and limit the number of results.`,
 		Long: `Run saved quick command by alias.
 You can run multiple commands by providing multiple aliases.`,
 		Example: `  jj history run myjob_quick            # Run single command
-  jj history run alias1 alias2 alias3  # Run multiple commands
-  jj history run -e prod               # Interactive selection in prod env`,
+  jj history run alias1 alias2 alias3  # Run multiple commands`,
 		Run: func(cmd *cobra.Command, args []string) {
 
 			// 运行指定的命令
@@ -102,7 +108,7 @@ You can run multiple commands by providing multiple aliases.`,
 		ValidArgsFunction: completeAliases,
 		Example: `  jj history view alias1              # View single command
   jj history view alias1 alias2       # View multiple commands
-  jj history view -f json alias1      # Output in JSON format`,
+  jj history view alias1      # Output in JSON format`,
 		Run: func(cmd *cobra.Command, args []string) {
 			for _, alias := range args {
 				viewQuickCmd(alias)
@@ -157,8 +163,7 @@ You can run multiple commands by providing multiple aliases.`,
 		Long:    "Search saved quick commands by keyword in alias, job name, or description.",
 		Args:    cobra.ExactArgs(1),
 		Example: `  jj history search "prod"            # Search for "prod" in all fields
-  jj history search -e dev "deploy"    # Search in dev environment
-  jj history search -f json "job"      # Output in JSON format`,
+  jj history search --format=json "job"      # Output in JSON format`,
 		Run: func(cmd *cobra.Command, args []string) {
 			searchQuickCmds(args[0])
 		},
@@ -174,8 +179,7 @@ You can run multiple commands by providing multiple aliases.`,
 		Short:   "Export history to file",
 		Long:    "Export history records to a file in various formats.",
 		Example: `  jj history export history.json      # Export to JSON file
-  jj history export history.yaml      # Export to YAML file
-  jj history export -e prod prod.yaml # Export prod environment to YAML`,
+  jj history export history.yaml      # Export to YAML file`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
 				exportHistory("")
@@ -184,7 +188,14 @@ You can run multiple commands by providing multiple aliases.`,
 			}
 		},
 	}
-	historyExportCmd.Flags().StringVarP(&formatFlag, "format", "", "yaml", "Export format (json, yaml, csv)")
+	historyExportCmd.Flags().StringVarP(&exportFormatFlag, "format", "", "yaml", "Export format (json, yaml, csv)")
+	// 为 export 的 --format 添加自动补全
+	exportFormatFlagLookup := historyExportCmd.Flags().Lookup("format")
+	if exportFormatFlagLookup != nil {
+		exportFormatFlagLookup.Annotations = map[string][]string{
+			cobra.BashCompCustom: {"__jj_export_format_completion"},
+		}
+	}
 	historyCmd.AddCommand(historyExportCmd)
 
 	// ========== history import 命令 ==========
@@ -253,33 +264,32 @@ func runQuickCmds(aliases []string) {
 	history := jj.GetQuickRunCmdList()
 
 	// 验证别名是否存在
-	var validCmds []*jj.QuickRunCmdDefinition
+	var validCmdIndices []int // 保存 history 中的索引
 	var notFoundAliases []string
 
 	for _, alias := range aliases {
-		var cmd *jj.QuickRunCmdDefinition
-		for _, item := range history {
-			if item.Alias == alias {
-				cmd = &item
+		found := false
+		for i := range history {
+			if history[i].Alias == alias {
+				validCmdIndices = append(validCmdIndices, i)
+				found = true
 				break
 			}
 		}
 
-		if cmd == nil {
+		if !found {
 			notFoundAliases = append(notFoundAliases, alias)
-		} else {
-			validCmds = append(validCmds, cmd)
 		}
 	}
 
 	// 显示未找到的别名
 	if len(notFoundAliases) > 0 {
-		fmt.Printf(chalk.Red.Color("Error: The following aliases were not found:\n"))
+		fmt.Print(chalk.Red.Color("Error: The following aliases were not found:\n"))
 		for _, alias := range notFoundAliases {
 			fmt.Printf("  - %s\n", alias)
 		}
 
-		if len(validCmds) == 0 {
+		if len(validCmdIndices) == 0 {
 			return
 		}
 
@@ -296,10 +306,10 @@ func runQuickCmds(aliases []string) {
 	}
 
 	// 确认执行
-	if !forceFlag && len(validCmds) > 1 {
-		fmt.Printf("\n%s commands will be executed:\n", len(validCmds))
-		for _, cmd := range validCmds {
-			fmt.Printf("  • %s: %s\n", cmd.Alias, cmd.JobName)
+	if !forceFlag && len(validCmdIndices) > 1 {
+		fmt.Printf("\n%d commands will be executed:\n", len(validCmdIndices))
+		for _, idx := range validCmdIndices {
+			fmt.Printf("  • %s: %s\n", history[idx].Alias, history[idx].JobName)
 		}
 
 		fmt.Print("\nContinue? [y/N]: ")
@@ -312,21 +322,27 @@ func runQuickCmds(aliases []string) {
 	}
 
 	// 执行命令
-	for _, cmd := range validCmds {
+	for _, idx := range validCmdIndices {
+		cmd := &history[idx]
 		fmt.Printf("\n%s Running: %s %s\n",
 			chalk.Green.Color("→"),
 			chalk.Bold.TextStyle(cmd.Alias),
 			chalk.Dim.TextStyle("("+cmd.JobName+")"))
 
-		// 更新执行统计
-		cmd.Executimes++
-		cmd.LastExecTime = time.Now().Unix()
-
 		// 执行命令（这里需要根据你的实际情况实现）
-		if err := executeQuickCommand(cmd); err != nil {
+		var jobUrl string
+		var err error
+		if jobUrl, err = executeQuickCommand(cmd); err != nil {
 			fmt.Printf(chalk.Red.Color("Error executing %s: %v\n"), cmd.Alias, err)
 		} else {
 			fmt.Printf(chalk.Green.Color("✓ Command %s executed successfully\n"), cmd.Alias)
+
+			// 更新执行统计和 LastJobUrl
+			history[idx].Executimes++
+			history[idx].LastExecTime = time.Now().Unix()
+			if jobUrl != "" {
+				history[idx].LastJobUrl = jobUrl
+			}
 		}
 	}
 
@@ -334,7 +350,8 @@ func runQuickCmds(aliases []string) {
 }
 
 // 执行单个命令（需要根据你的实际执行逻辑实现）
-func executeQuickCommand(cmd *jj.QuickRunCmdDefinition) error {
+// 返回 jobUrl 和 error
+func executeQuickCommand(cmd *jj.QuickRunCmdDefinition) (string, error) {
 	// 这里需要解析 cmd.Cmd 并执行
 	// 例如：解析 "jj run jobname -a param=value" 这样的命令
 
@@ -354,11 +371,96 @@ func executeQuickCommand(cmd *jj.QuickRunCmdDefinition) error {
 		inputArgs.args = append(inputArgs.args, strings.Trim(arg, " "))
 	}
 
+	// 保存当前的 curSt，以便在执行后获取 jobNum
+	oldCurSt := curSt
+	curSt = st{}
+
 	runJob(cmd.JobName)
 
-	// 模拟执行
-	// time.Sleep(500 * time.Millisecond)
-	return nil
+	// 从 curSt 获取 jobNum，构建 jobUrl
+	var jobUrl string
+	if curSt.id > 0 {
+		env := jj.Init(cmd.Env)
+		jobUrl = jj.GetConsoleUrl(env, cmd.JobName, curSt.id)
+	}
+
+	// 恢复 curSt
+	curSt = oldCurSt
+
+	return jobUrl, nil
+}
+
+// 格式化相对时间
+func formatRelativeTime(timestamp int64) string {
+	if timestamp <= 0 {
+		return "Never"
+	}
+
+	now := time.Now()
+	t := time.Unix(timestamp, 0)
+	diff := now.Sub(t)
+
+	if diff < time.Minute {
+		return "Just now"
+	} else if diff < time.Hour {
+		minutes := int(diff.Minutes())
+		if minutes == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", minutes)
+	} else if diff < 24*time.Hour {
+		hours := int(diff.Hours())
+		if hours == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", hours)
+	} else if diff < 7*24*time.Hour {
+		days := int(diff.Hours() / 24)
+		if days == 1 {
+			return "1 day ago"
+		}
+		return fmt.Sprintf("%d days ago", days)
+	} else if diff < 30*24*time.Hour {
+		weeks := int(diff.Hours() / (7 * 24))
+		if weeks == 1 {
+			return "1 week ago"
+		}
+		return fmt.Sprintf("%d weeks ago", weeks)
+	} else {
+		// 超过30天显示具体日期
+		return t.Format("2006-01-02 15:04:05")
+	}
+}
+
+// 格式化时间显示（详细格式）
+func formatTimeDetailed(timestamp int64) string {
+	if timestamp <= 0 {
+		return "Never"
+	}
+	t := time.Unix(timestamp, 0)
+	now := time.Now()
+	diff := now.Sub(t)
+
+	// 如果是今天，只显示时间
+	if t.Year() == now.Year() && t.Month() == now.Month() && t.Day() == now.Day() {
+		return fmt.Sprintf("Today %s", t.Format("15:04:05"))
+	}
+
+	// 如果是昨天
+	if diff < 48*time.Hour && diff >= 24*time.Hour {
+		yesterday := now.AddDate(0, 0, -1)
+		if t.Year() == yesterday.Year() && t.Month() == yesterday.Month() && t.Day() == yesterday.Day() {
+			return fmt.Sprintf("Yesterday %s", t.Format("15:04:05"))
+		}
+	}
+
+	// 如果是今年，显示月-日 时:分:秒
+	if t.Year() == now.Year() {
+		return t.Format("01-02 15:04:05")
+	}
+
+	// 其他情况显示完整日期
+	return t.Format("2006-01-02 15:04:05")
 }
 
 // 查看命令详情
@@ -374,29 +476,42 @@ func viewQuickCmd(alias string) {
 		}
 	}
 
+	if findCmd == nil {
+		fmt.Printf(chalk.Red.Color("Error: Quick command '%s' not found\n"), alias)
+		return
+	}
+
 	// 根据格式输出
 	switch strings.ToLower(formatFlag) {
 	case "json":
-		data, _ := json.MarshalIndent(findCmd, "", "  ")
+		formatted := formatQuickCmd(*findCmd)
+		data, _ := json.MarshalIndent(formatted, "", "  ")
 		fmt.Println(string(data))
 	case "yaml":
-		data, _ := yaml.Marshal(findCmd)
+		formatted := formatQuickCmd(*findCmd)
+		data, _ := yaml.Marshal(formatted)
 		fmt.Println(string(data))
 	default:
 		// 表格格式
 		fmt.Println(chalk.Cyan.Color("╭─────────────────────────────────────────────────────────────────────────────╮"))
-		fmt.Println(chalk.Cyan.Color("│ ") + chalk.Bold.TextStyle("Quick Command Details") + chalk.Cyan.Color("                                                              │"))
+		fmt.Println(chalk.Cyan.Color("│ ") + chalk.Bold.TextStyle("Quick Command Details") + chalk.Cyan.Color("                                                       │"))
 		fmt.Println(chalk.Cyan.Color("╰─────────────────────────────────────────────────────────────────────────────╯"))
 
 		fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Alias:"), chalk.Green.Color(findCmd.Alias))
 		fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Command:"), findCmd.Cmd)
-		fmt.Printf("%s %s #%d\n", chalk.Bold.TextStyle("LastJobUrl:"), findCmd.JobName, findCmd.LastJobUrl)
-		fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Environment:"), findCmd.Env)
+		fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Job Name:"), chalk.Cyan.Color(findCmd.JobName))
+		if findCmd.LastJobUrl != "" {
+			fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Last Job URL:"), chalk.Underline.TextStyle(findCmd.LastJobUrl))
+		} else {
+			fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Last Job URL:"), chalk.Dim.TextStyle("Not available"))
+		}
+		fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Environment:"), chalk.Magenta.Color(findCmd.Env))
 		fmt.Printf("%s %d\n", chalk.Bold.TextStyle("Executed times:"), findCmd.Executimes)
 
 		if findCmd.LastExecTime > 0 {
-			fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Last executed:"),
-				time.Unix(findCmd.LastExecTime, 0).Format("2006-01-02 15:04:05"))
+			fmt.Printf("%s %s (%s)\n", chalk.Bold.TextStyle("Last executed:"),
+				formatTimeDetailed(findCmd.LastExecTime),
+				chalk.Dim.TextStyle(formatRelativeTime(findCmd.LastExecTime)))
 		} else {
 			fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Last executed:"), "Never")
 		}
@@ -487,10 +602,6 @@ func searchQuickCmds(keyword string) {
 
 	for _, cmd := range history {
 		// 搜索别名、作业名、环境、描述
-		if envFilter != "" && !strings.EqualFold(cmd.Env, envFilter) {
-			continue
-		}
-
 		if strings.Contains(strings.ToLower(cmd.Alias), keyword) ||
 			strings.Contains(strings.ToLower(cmd.JobName), keyword) ||
 			strings.Contains(strings.ToLower(cmd.Env), keyword) {
@@ -528,6 +639,39 @@ func importHistory(filename string) {
 	fmt.Println("Import function - TODO")
 }
 
+// 格式化输出的结构体（用于 JSON/YAML 输出）
+type formattedQuickCmd struct {
+	Alias        string `json:"alias" yaml:"alias"`
+	JobName      string `json:"jobName" yaml:"jobName"`
+	Cmd          string `json:"cmd" yaml:"cmd"`
+	Executimes   int    `json:"executimes" yaml:"executimes"`
+	LastExecTime string `json:"lastExecTime" yaml:"lastExecTime"` // 格式化为字符串
+	LastExecUnix int64  `json:"lastExecUnix" yaml:"lastExecUnix"` // 保留原始时间戳
+	Env          string `json:"env" yaml:"env"`
+	LastJobUrl   string `json:"lastJobUrl" yaml:"lastJobUrl"`
+}
+
+// 将 QuickRunCmdDefinition 转换为格式化结构体
+func formatQuickCmd(cmd jj.QuickRunCmdDefinition) formattedQuickCmd {
+	var lastExecTimeStr string
+	if cmd.LastExecTime > 0 {
+		lastExecTimeStr = time.Unix(cmd.LastExecTime, 0).Format("2006-01-02 15:04:05")
+	} else {
+		lastExecTimeStr = "Never"
+	}
+
+	return formattedQuickCmd{
+		Alias:        cmd.Alias,
+		JobName:      cmd.JobName,
+		Cmd:          cmd.Cmd,
+		Executimes:   cmd.Executimes,
+		LastExecTime: lastExecTimeStr,
+		LastExecUnix: cmd.LastExecTime,
+		Env:          cmd.Env,
+		LastJobUrl:   cmd.LastJobUrl,
+	}
+}
+
 // 列表命令
 func listQuickCmds() {
 
@@ -541,42 +685,36 @@ func listQuickCmds() {
 	// 根据格式输出
 	switch strings.ToLower(formatFlag) {
 	case "json":
-		var filtered []jj.QuickRunCmdDefinition
-		if envFilter != "" {
-			for _, cmd := range history {
-				if strings.EqualFold(cmd.Env, envFilter) {
-					filtered = append(filtered, cmd)
-				}
-			}
-		} else {
-			filtered = history
-		}
+		filtered := history
 
 		if limitFlag > 0 && limitFlag < len(filtered) {
 			filtered = filtered[:limitFlag]
 		}
 
-		data, _ := json.MarshalIndent(filtered, "", "  ")
+		// 转换为格式化结构体
+		formatted := make([]formattedQuickCmd, len(filtered))
+		for i, cmd := range filtered {
+			formatted[i] = formatQuickCmd(cmd)
+		}
+
+		data, _ := json.MarshalIndent(formatted, "", "  ")
 		fmt.Println(string(data))
 		return
 
 	case "yaml":
-		var filtered []jj.QuickRunCmdDefinition
-		if envFilter != "" {
-			for _, cmd := range history {
-				if strings.EqualFold(cmd.Env, envFilter) {
-					filtered = append(filtered, cmd)
-				}
-			}
-		} else {
-			filtered = history
-		}
+		filtered := history
 
 		if limitFlag > 0 && limitFlag < len(filtered) {
 			filtered = filtered[:limitFlag]
 		}
 
-		data, _ := yaml.Marshal(filtered)
+		// 转换为格式化结构体
+		formatted := make([]formattedQuickCmd, len(filtered))
+		for i, cmd := range filtered {
+			formatted[i] = formatQuickCmd(cmd)
+		}
+
+		data, _ := yaml.Marshal(formatted)
 		fmt.Println(string(data))
 		return
 	}
@@ -584,23 +722,11 @@ func listQuickCmds() {
 	// 默认表格格式
 	fmt.Println(chalk.Cyan.Color("╭─────────────────────────────────────────────────────────────────────────────────────────────────────╮"))
 	title := "Saved Quick Commands"
-	if envFilter != "" {
-		title += " [" + envFilter + "]"
-	}
 	fmt.Println(chalk.Cyan.Color("│ ") + chalk.Bold.TextStyle(title) + chalk.Cyan.Color(strings.Repeat(" ", 88-len(title))) + " │")
 	fmt.Println(chalk.Cyan.Color("╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯"))
 
-	// 过滤环境
-	var filtered []jj.QuickRunCmdDefinition
-	if envFilter != "" {
-		for _, cmd := range history {
-			if strings.EqualFold(cmd.Env, envFilter) {
-				filtered = append(filtered, cmd)
-			}
-		}
-	} else {
-		filtered = history
-	}
+	// 过滤结果
+	filtered := history
 
 	if limitFlag > 0 && limitFlag < len(filtered) {
 		filtered = filtered[:limitFlag]
@@ -612,10 +738,10 @@ func listQuickCmds() {
 	fmt.Println(chalk.Dim.TextStyle(strings.Repeat("─", 120)))
 
 	for _, cmd := range filtered {
-		// 格式化时间
+		// 格式化时间 - 使用相对时间
 		var lastExecTime string
 		if cmd.LastExecTime > 0 {
-			lastExecTime = time.Unix(cmd.LastExecTime, 0).Format("2006-01-02 15:04:05")
+			lastExecTime = formatRelativeTime(cmd.LastExecTime)
 		} else {
 			lastExecTime = "Never"
 		}
@@ -699,7 +825,7 @@ func askToSaveQuickCmd(cmd, jobName string, jobNum int, env jj.Env) {
 	}
 }
 
-func saveQuickCmdWithAlias(cmd, jobName string, _ int, env jj.Env) {
+func saveQuickCmdWithAlias(cmd, jobName string, jobNum int, env jj.Env) {
 	// 加载现有历史
 	history := jj.GetQuickRunCmdList()
 
@@ -710,6 +836,12 @@ func saveQuickCmdWithAlias(cmd, jobName string, _ int, env jj.Env) {
 		return
 	}
 
+	// 构建 LastJobUrl
+	var lastJobUrl string
+	if jobNum > 0 {
+		lastJobUrl = jj.GetConsoleUrl(env, jobName, jobNum)
+	}
+
 	// 创建命令定义
 	cmdDef := jj.QuickRunCmdDefinition{
 		Alias:        alias,
@@ -718,6 +850,7 @@ func saveQuickCmdWithAlias(cmd, jobName string, _ int, env jj.Env) {
 		Executimes:   1,
 		LastExecTime: time.Now().Unix(),
 		Env:          string(env.Name),
+		LastJobUrl:   lastJobUrl,
 	}
 
 	// 保存到历史

@@ -43,6 +43,16 @@ __jj_get_env()
     return 0
 }
 
+__jj_format_completion()
+{
+    COMPREPLY=( $( compgen -W "table json yaml" -- "$cur" ) )
+}
+
+__jj_export_format_completion()
+{
+    COMPREPLY=( $( compgen -W "json yaml csv" -- "$cur" ) )
+}
+
 __jj_get_resource()
 {
 	__jj_parse_get ${nouns[@]}
