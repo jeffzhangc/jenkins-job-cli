@@ -20,6 +20,18 @@ builds:
       - amd64
       - arm64
     binary: jenkins-job-cli
+    # UPX 压缩配置（使用 hooks）
+    # 注意：macOS 通常不支持 UPX，所以排除 darwin
+    hooks:
+      post:
+        - |
+          if [ "{{ .Os }}" != "darwin" ]; then
+            if command -v upx >/dev/null 2>&1; then
+              upx --best --lzma "{{ .Path }}" || echo "UPX compression failed for {{ .Path }}, continuing..."
+            else
+              echo "Warning: UPX not found, skipping compression for {{ .Path }}"
+            fi
+          fi
 
 archives:
   - name_template: >-
@@ -174,7 +186,7 @@ homebrew_casks:
     hooks:
       post:
         install: |
-          brew_prefix = `brew --prefix`.chomp
+          brew_prefix = ENV['HOMEBREW_PREFIX'] || '/opt/homebrew'
           target = "#{brew_prefix}/bin/jj"
           binary_path = "#{staged_path}/jenkins-job-cli"
           
