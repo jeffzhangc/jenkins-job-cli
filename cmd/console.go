@@ -98,6 +98,7 @@ func init() {
 			fmt.Printf("Console URL: %s\n", chalk.Underline.TextStyle(jobUrl))
 
 			if !runningFlag {
+				inputArgs.args = append(inputArgs.args, "test", "skip save history")
 				printQuickRunJobByID(env, jobName, buildNum)
 			}
 			return nil
