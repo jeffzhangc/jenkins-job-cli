@@ -336,7 +336,7 @@ func runQuickCmds(aliases []string) {
 			fmt.Printf(chalk.Red.Color("Error executing %s: %v\n"), cmd.Alias, err)
 		} else {
 			fmt.Printf(chalk.Green.Color("✓ Command %s executed successfully\n"), cmd.Alias)
-
+			fmt.Printf(chalk.Green.Color("✓ res job url %s\n"), jobUrl)
 			// 更新执行统计和 LastJobUrl
 			history[idx].Executimes++
 			history[idx].LastExecTime = time.Now().Unix()
@@ -372,20 +372,17 @@ func executeQuickCommand(cmd *jj.QuickRunCmdDefinition) (string, error) {
 	}
 
 	// 保存当前的 curSt，以便在执行后获取 jobNum
-	oldCurSt := curSt
-	curSt = st{}
 
-	runJob(cmd.JobName)
+	jobNum := runJob(cmd.JobName)
 
 	// 从 curSt 获取 jobNum，构建 jobUrl
 	var jobUrl string
-	if curSt.id > 0 {
+	if jobNum > 0 {
 		env := jj.Init(cmd.Env)
-		jobUrl = jj.GetConsoleUrl(env, cmd.JobName, curSt.id)
+		jobUrl = jj.GetConsoleUrl(env, cmd.JobName, jobNum)
+	} else {
+		return "", fmt.Errorf("job '%s' run failed", cmd.JobName)
 	}
-
-	// 恢复 curSt
-	curSt = oldCurSt
 
 	return jobUrl, nil
 }

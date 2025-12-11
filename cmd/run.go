@@ -145,7 +145,7 @@ func askParams(params []*jj.ParameterDefinitions) map[string]string {
 	return data
 }
 
-func runJob(name string) {
+func runJob(name string) int {
 	env := jj.Init(ENV)
 	time.Sleep(time.Millisecond * 200)
 	fmt.Printf("Job will be started in the %s environment\n", chalk.Underline.TextStyle(string(env.Name)))
@@ -203,20 +203,20 @@ func runJob(name string) {
 	curSt.id = number
 	err = watchTheJob(env, name, number, keyCh)
 	if err != nil {
-		return
+		return -1
 	}
 	curSt = st{}
 	for _, jChild := range jobInfo.DownstreamProjects {
 		err = watchNext(env, name, jChild.Name, number, keyCh)
 		if err != nil {
-			return
+			return -1
 		}
 		curSt = st{}
 	}
 	fmt.Println(chalk.Green.Color("Done"))
 	stdinListener.Close()
 	printQuickRunJobByID(env, name, number)
-	return
+	return number
 }
 
 func waitForExecutor(env jj.Env, queueId int) int {
