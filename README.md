@@ -101,7 +101,23 @@ The `jj history` command allows you to save, manage, and quickly rerun frequentl
 
 ### Save Quick Commands
 
-After running a job, you'll be prompted to save the command with an alias. You can also save commands manually by running them normally - the tool will ask if you want to save them.
+After running a job, you'll be prompted to save the command with an alias. You can also save commands manually:
+
+```bash
+# Manually add a command with alias (interactive)
+jj history add "jj run cc-stat3 -n aicc -a env=dev-93 -a DeliveryModel=BuildAndDeploy"
+
+# The command will parse and display:
+# - Job Name: cc-stat3
+# - Environment: aicc
+# - Parameters: env=dev-93, DeliveryModel=BuildAndDeploy, etc.
+# Then you'll be prompted to enter an alias name
+```
+
+**Alias Duplicate Handling:**
+- If the alias already exists, you'll be asked whether to overwrite it
+- Enter `y` or `yes` to overwrite the existing command
+- Enter `n` or `N` to keep the existing command and enter a new alias
 
 ### List Saved Commands
 
@@ -213,6 +229,7 @@ jj history import -m backup.yaml
 - `search` / `s` / `find` / `grep` - Search commands
 - `export` / `exp` / `save` - Export history
 - `import` / `imp` / `load` - Import history
+- `add` / `a` / `save` - Add command to history
 
 ## Features
 

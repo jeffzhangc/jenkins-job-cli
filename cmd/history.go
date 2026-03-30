@@ -214,6 +214,22 @@ You can run multiple commands by providing multiple aliases.`,
 	historyImportCmd.Flags().BoolVarP(&forceFlag, "merge", "m", false, "Merge instead of replace")
 	historyCmd.AddCommand(historyImportCmd)
 
+	// ========== history add 命令 ==========
+	var historyAddCmd = &cobra.Command{
+		Use:     "add [command]",
+		Aliases: []string{"a", "save"},
+		Short:   "Add a command to history with alias",
+		Long: `Add a command to history with alias.
+Supports parsing jj run commands with environment and parameters.`,
+		Example: `  jj history add "jj run cc-stat3 -n aicc -a env=dev-93 -a DeliveryModel=BuildAndDeploy"
+  jj history add "jj run myjob -n prod -a branch=main"`,
+		Args: cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			addQuickCmd(args[0])
+		},
+	}
+	historyCmd.AddCommand(historyAddCmd)
+
 	// 添加到根命令
 	rootCmd.AddCommand(historyCmd)
 }
@@ -892,5 +908,184 @@ func getAliasFromUser(history []jj.QuickRunCmdDefinition) string {
 		}
 
 		return alias
+	}
+}
+
+// 解析命令字符串，提取 jobName, env, 和参数
+// 支持格式：jj run <jobName> [-n <env>] [-a key=value ...]
+func parseCommand(cmdStr string) (jobName, env string, args []string, err error) {
+	// 去除前后空格
+	cmdStr = strings.TrimSpace(cmdStr)
+
+	// 移除可能的前缀 "jj run" 或 "jj r"
+	prefixes := []string{"jj run ", "jj r "}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(cmdStr, prefix) {
+			cmdStr = cmdStr[len(prefix):]
+			break
+		}
+	}
+
+	// 使用简单的词法分析来解析命令
+	// 格式：<jobName> [-n <env>] [-a key=value ...]
+	parts := strings.Fields(cmdStr)
+	if len(parts) == 0 {
+		return "", "", nil, fmt.Errorf("empty command")
+	}
+
+	// 第一个部分是 jobName
+	jobName = parts[0]
+
+	// 解析剩余参数
+	for i := 1; i < len(parts); {
+		if parts[i] == "-n" && i+1 < len(parts) {
+			env = parts[i+1]
+			i += 2
+		} else if parts[i] == "-a" && i+1 < len(parts) {
+			args = append(args, parts[i+1])
+			i += 2
+		} else {
+			// 跳过未知参数
+			i++
+		}
+	}
+
+	if jobName == "" {
+		return "", "", nil, fmt.Errorf("job name is required")
+	}
+
+	return jobName, env, args, nil
+}
+
+// 构建完整的命令字符串
+func buildCommand(jobName, env string, args []string) string {
+	cmd := "jj run " + jobName
+	if env != "" {
+		cmd += " -n " + env
+	}
+	for _, arg := range args {
+		cmd += " -a " + arg
+	}
+	return cmd
+}
+
+// 添加快速命令到历史
+func addQuickCmd(cmdStr string) {
+	// 解析命令
+	jobName, env, args, err := parseCommand(cmdStr)
+	if err != nil {
+		fmt.Println(chalk.Red.Color("Error: Failed to parse command: ") + err.Error())
+		return
+	}
+
+	fmt.Println(chalk.Cyan.Color("╭─────────────────────────────────────────────────────────────────────────────╮"))
+	fmt.Println(chalk.Cyan.Color("│ ") + chalk.Bold.TextStyle("Add Command to History") + chalk.Cyan.Color("                                                    │"))
+	fmt.Println(chalk.Cyan.Color("╰─────────────────────────────────────────────────────────────────────────────╯"))
+	fmt.Printf("\n%s %s\n", chalk.Bold.TextStyle("Parsed Job Name:"), chalk.Green.Color(jobName))
+	if env != "" {
+		fmt.Printf("%s %s\n", chalk.Bold.TextStyle("Environment:"), chalk.Magenta.Color(env))
+	}
+	if len(args) > 0 {
+		fmt.Printf("%s\n", chalk.Bold.TextStyle("Parameters:"))
+		for _, arg := range args {
+			fmt.Printf("  • %s\n", chalk.Dim.TextStyle(arg))
+		}
+	}
+
+	// 构建完整的命令字符串
+	fullCmd := buildCommand(jobName, env, args)
+	fmt.Printf("\n%s %s\n", chalk.Bold.TextStyle("Command:"), chalk.Dim.TextStyle(fullCmd))
+
+	// 加载现有历史
+	history := jj.GetQuickRunCmdList()
+
+	// 获取用户输入的别名
+	alias, isDuplicate, shouldOverwrite := getAliasForAdd(history)
+	if alias == "" {
+		fmt.Println(chalk.Dim.TextStyle("No alias entered, cancelled.\n"))
+		return
+	}
+
+	// 如果是重复的别名且用户选择覆盖
+	if isDuplicate && shouldOverwrite {
+		// 找到现有记录的索引
+		for i, cmd := range history {
+			if strings.EqualFold(cmd.Alias, alias) {
+				// 更新现有记录
+				history[i].Cmd = fullCmd
+				history[i].JobName = jobName
+				history[i].Env = env
+				history[i].Executimes = 0 // 重置执行次数
+				history[i].LastExecTime = 0
+				history[i].LastJobUrl = ""
+
+				jj.SaveAllHistory(history)
+				fmt.Println(chalk.Green.Color("✓ Command updated successfully!\n"))
+				fmt.Printf("You can now run it with: %s\n", chalk.Green.Color("jj history run "+alias))
+				return
+			}
+		}
+	}
+
+	// 创建新的命令定义
+	cmdDef := jj.QuickRunCmdDefinition{
+		Alias:        alias,
+		Cmd:          fullCmd,
+		JobName:      jobName,
+		Env:          env,
+		Executimes:   0,
+		LastExecTime: 0,
+		LastJobUrl:   "",
+	}
+
+	// 保存到历史
+	jj.AddQuickRunCmd(cmdDef)
+	fmt.Println(chalk.Green.Color("✓ Command added successfully!\n"))
+	fmt.Printf("You can now run it with: %s\n", chalk.Green.Color("jj history run "+alias))
+}
+
+// 获取添加命令时的别名输入
+// 返回：alias, isDuplicate, shouldOverwrite
+func getAliasForAdd(history []jj.QuickRunCmdDefinition) (string, bool, bool) {
+	historyNames := []string{}
+	for _, item := range history {
+		historyNames = append(historyNames, item.Alias)
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Print(chalk.Cyan.Color("Enter alias name: "))
+		alias, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println(chalk.Red.Color("Error reading input"))
+			return "", false, false
+		}
+
+		alias = strings.TrimSpace(alias)
+
+		if alias == "" {
+			fmt.Println(chalk.Yellow.Color("Alias cannot be empty. Please try again."))
+			continue
+		}
+
+		// 检查别名是否已存在
+		if slices.Contains(historyNames, alias) {
+			// 发现重复，询问是否覆盖
+			fmt.Printf("\n%s Alias '%s' already exists.\n", chalk.Yellow.Color("⚠️"), chalk.Green.Color(alias))
+			fmt.Print(chalk.Yellow.Color("Overwrite? [y/N]: "))
+
+			answer, _ := reader.ReadString('\n')
+			answer = strings.TrimSpace(strings.ToLower(answer))
+
+			if answer == "y" || answer == "yes" {
+				return alias, true, true
+			}
+			// 不覆盖，继续输入
+			fmt.Println(chalk.Dim.TextStyle("Please enter a different alias."))
+			continue
+		}
+
+		return alias, false, false
 	}
 }

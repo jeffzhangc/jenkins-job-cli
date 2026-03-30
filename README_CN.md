@@ -101,7 +101,23 @@ jj console app-xxx
 
 ### 保存快速命令
 
-运行任务后，系统会提示您使用别名保存该命令。您也可以通过正常运行命令来手动保存 - 工具会询问您是否要保存它们。
+运行任务后，系统会提示您使用别名保存该命令。您也可以通过手动方式添加命令：
+
+```bash
+# 手动添加命令并设置别名（交互式）
+jj history add "jj run cc-stat3 -n aicc -a env=dev-93 -a DeliveryModel=BuildAndDeploy"
+
+# 命令将解析并显示：
+# - 任务名称：cc-stat3
+# - 环境：aicc
+# - 参数：env=dev-93, DeliveryModel=BuildAndDeploy 等
+# 然后会提示您输入别名
+```
+
+**别名重复处理：**
+- 如果别名已存在，会询问是否覆盖
+- 输入 `y` 或 `yes` 覆盖现有命令
+- 输入 `n` 或 `N` 保留现有命令并输入新别名
 
 ### 列出已保存的命令
 
@@ -213,6 +229,7 @@ jj history import -m backup.yaml
 - `search` / `s` / `find` / `grep` - 搜索命令
 - `export` / `exp` / `save` - 导出历史
 - `import` / `imp` / `load` - 导入历史
+- `add` / `a` / `save` - 添加命令到历史
 
 ## 功能特性
 
