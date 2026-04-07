@@ -13,14 +13,16 @@ clean:
 
 # Build for current platform
 build:
+	@mkdir -p dist
 	go mod tidy
-	CGO_ENABLED=0 go build -tags release -ldflags $(LD_FLAGS) -o jenkins-job-cli
-	cp $(NAME) jj  # 创建符号链接
+	CGO_ENABLED=0 go build -tags release -ldflags $(LD_FLAGS) -o dist/jenkins-job-cli
+	cp dist/$(NAME) dist/jj  # 创建符号链接
 	@bash ./scripts/completions.sh
 
 build-dev:
-	go build -ldflags "-w -X main.version=$(VERSION)-dev -X main.build=$(BUILD) -extldflags=$(EXT_LD_FLAGS)"
-	cp $(NAME) jj  # 创建符号链接
+	@mkdir -p dist
+	go build -ldflags "-w -X main.version=$(VERSION)-dev -X main.build=$(BUILD) -extldflags=$(EXT_LD_FLAGS)" -o dist/jenkins-job-cli
+	cp dist/$(NAME) dist/jj  # 创建符号链接
 
 # Build for all platforms (legacy, kept for compatibility)
 build-all: clean
