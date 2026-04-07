@@ -291,7 +291,7 @@ func barHandler(jobUrl string, keyCh chan string, chMsg chan string, finishCh ch
 			}
 
 			barMutex.Lock()
-			br.SetFormat(fmt.Sprintf(jobUrl + ": " + info.result))
+			br.SetFormat(jobUrl + ": " + info.result)
 			br.Done()
 			barMutex.Unlock()
 			if info.err != nil {
@@ -531,65 +531,66 @@ func listenInterrupt(env jj.Env) {
 	signal.Notify(c, os.Interrupt)
 	go func() {
 		for _ = range c {
-			if curSt.name != "" {
-				barMutex.Lock()
+			if curSt.name == "" {
+				continue
+			}
+			barMutex.Lock()
+			stdinListener.NewListener()
+			readline.Stdin = stdinListener
+			rl, err := readline.New(fmt.Sprintf("There is active build: %s. Do you want to cancel it [Y/n]:", curSt.name))
+			if err != nil {
+				barMutex.Unlock()
+				os.Exit(1)
+			}
+			line, err := rl.Readline()
+			rl.Close()
+			barMutex.Unlock()
+			if err != nil { // io.EOF
+				os.Exit(1)
+			}
+			if line == "Y" || line == "y" {
 
-				defer barMutex.Unlock()
-				stdinListener.NewListener()
-				readline.Stdin = stdinListener
-				rl, err := readline.New(fmt.Sprintf("There is active build: %s. Do you want to cancel it [Y/n]:", curSt.name))
-				defer rl.Close()
-				if err != nil {
-					os.Exit(1)
+				if curSt.queue != 0 {
+					fmt.Println("canceling queue...")
+					jj.CancelQueue(env, curSt.queue)
 				}
-				line, err := rl.Readline()
-				if err != nil { // io.EOF
-					os.Exit(1)
-				}
-				if line == "Y" || line == "y" {
-
-					if curSt.queue != 0 {
-						fmt.Println("canceling queue...")
-						jj.CancelQueue(env, curSt.queue)
-					}
-					if curSt.id != 0 {
-						fmt.Println("canceling job...")
-						status, err := jj.CancelJob(env, curSt.name, curSt.id)
-						if err != nil {
-							fmt.Printf("failed to cancel job, error %s", err)
-							os.Exit(0)
-						}
-						if status != "ABORTED" {
-							fmt.Printf("Job already has been executed, status: %s", status)
-							os.Exit(0)
-						}
-						fmt.Println("Canceled")
+				if curSt.id != 0 {
+					fmt.Println("canceling job...")
+					status, err := jj.CancelJob(env, curSt.name, curSt.id)
+					if err != nil {
+						fmt.Printf("failed to cancel job, error %s", err)
 						os.Exit(0)
 					}
-					if curSt.queue != 0 && curSt.id == 0 {
-						err, jobInfo := jj.GetJobInfo(env, curSt.name)
-						check(err)
-						number := jobInfo.LastBuild.Number
-						for i := 0; i < 3; i++ {
-							bi, err := jj.GetBuildInfo(env, curSt.name, number-i)
-							if err != nil {
-								continue
-							}
-							if bi.QueueId == curSt.queue {
-								if bi.Result != "ABORTED" {
-									fmt.Printf("Job already has been executed, status: %s", bi.Result)
-									os.Exit(0)
-								} else {
-									fmt.Println("Canceled!")
-									os.Exit(0)
-								}
+					if status != "ABORTED" {
+						fmt.Printf("Job already has been executed, status: %s", status)
+						os.Exit(0)
+					}
+					fmt.Println("Canceled")
+					os.Exit(0)
+				}
+				if curSt.queue != 0 && curSt.id == 0 {
+					err, jobInfo := jj.GetJobInfo(env, curSt.name)
+					check(err)
+					number := jobInfo.LastBuild.Number
+					for i := 0; i < 3; i++ {
+						bi, err := jj.GetBuildInfo(env, curSt.name, number-i)
+						if err != nil {
+							continue
+						}
+						if bi.QueueId == curSt.queue {
+							if bi.Result != "ABORTED" {
+								fmt.Printf("Job already has been executed, status: %s", bi.Result)
+								os.Exit(0)
+							} else {
+								fmt.Println("Canceled!")
+								os.Exit(0)
 							}
 						}
-						fmt.Println("Canceled!!!")
 					}
+					fmt.Println("Canceled!!!")
 				}
-				os.Exit(0)
 			}
+			os.Exit(0)
 		}
 	}()
 }

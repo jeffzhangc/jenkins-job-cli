@@ -64,7 +64,14 @@ install: build install-completions
 	@echo "Installation completed. You can use 'jenkins-job-cli' or 'jj'"
 	@echo "Installation completed."
 
-
+uninstall:
+	$(eval HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo "/usr/local"))
+	@echo "Uninstalling $(NAME) and completions from $(HOMEBREW_PREFIX)"
+	sudo rm -f $(HOMEBREW_PREFIX)/bin/$(NAME) $(HOMEBREW_PREFIX)/bin/jj
+	sudo rm -f $(HOMEBREW_PREFIX)/etc/bash_completion.d/jj
+	sudo rm -f $(HOMEBREW_PREFIX)/share/zsh/site-functions/_jj
+	sudo rm -f $(HOMEBREW_PREFIX)/share/fish/vendor_completions.d/jj.fish
+	@echo "Uninstallation completed."
 
 # 使用 GoReleaser 发布
 goreleaser-release: clean
@@ -104,6 +111,7 @@ help:
 	@echo "  goreleaser-snapshot- Test build with GoReleaser"
 	@echo "  goreleaser-check   - Check GoReleaser configuration"
 	@echo "  install            - Install to $(HOMEBREW_PREFIX)/bin/ (both jenkins-job-cli and jj)"
+	@echo "  uninstall          - Remove installed binary and completions"
 	@echo "  clean              - Clean build artifacts"
 
-.PHONY: all clean build build-dev build-all image install goreleaser-check goreleaser-snapshot release goreleaser-init help
+.PHONY: all clean build build-dev build-all image install uninstall goreleaser-check goreleaser-snapshot release goreleaser-init help
