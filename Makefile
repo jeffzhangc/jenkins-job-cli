@@ -61,7 +61,7 @@ install-completions: build
 # Install to local system
 install: build install-completions
 	@echo "Installing $(NAME) to $(HOMEBREW_PREFIX)/bin/..."
-	sudo cp $(NAME) $(HOMEBREW_PREFIX)/bin/
+	sudo cp dist/$(NAME) $(HOMEBREW_PREFIX)/bin/
 	sudo ln -sf $(HOMEBREW_PREFIX)/bin/$(NAME) $(HOMEBREW_PREFIX)/bin/jj
 	@echo "Installation completed. You can use 'jenkins-job-cli' or 'jj'"
 	@echo "Installation completed."
