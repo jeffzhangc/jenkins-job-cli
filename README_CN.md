@@ -73,6 +73,31 @@ echo 'source <(jj completion bash)' >>~/.bashrc
 jj completion check
 ```
 
+### 配置目录
+
+`jj` 的配置保存在 `$XDG_CONFIG_HOME/jj`（默认 `~/.config/jj/`）：
+
+```bash
+~/.config/jj/
+├── config.yaml    # Jenkins 环境配置 + 历史选项
+├── history.yaml   # 保存的快速命令
+└── cache.<env>    # 各环境的 job 缓存
+```
+
+首次启动新版 `jj` 时会自动检测旧的 `~/.jj/` 目录：若其中存在
+`config.yaml`，会打印提示并自动迁移（优先 rename，跨设备时回退到
+copy）。
+
+历史相关的配置项位于 `config.yaml`：
+
+```yaml
+# 非 pinned 快速命令上限。0 或负数视为默认值（10）。
+history_limit: 10
+
+# 别名生成模板。空字符串时使用默认的 "<job>_<8字符hash>"。
+history_alias_template: "{job}_{param.branch}"
+```
+
 ### 使用示例
 
 ```bash
@@ -101,23 +126,69 @@ jj console app-xxx
 
 ### 保存快速命令
 
-运行任务后，系统会提示您使用别名保存该命令。您也可以通过手动方式添加命令：
+每次成功执行的 `jj run` 都会被**自动**记录 —— 无需手动确认或输入
+别名。环境、任务、参数完全相同的调用会命中同一条记录，累加
+`Executimes` 并刷新 `LastExecTime`；不同的调用则生成新记录。
+
+```bash
+# 1. 普通执行 —— 自动生成别名并写入历史
+jj run web-rpm-build-manual -n dev -a branch=main
+
+# 2. 同样命令再执行一次 —— 同一别名，Executimes += 1
+jj run web-rpm-build-manual -n dev -a branch=main
+
+# 3. 不同 branch —— 新建记录
+jj run web-rpm-build-manual -n dev -a branch=dev
+```
+
+如果只想保存而不执行，可以手动添加：
 
 ```bash
 # 手动添加命令并设置别名（交互式）
 jj history add "jj run cc-stat3 -n aicc -a env=dev-93 -a DeliveryModel=BuildAndDeploy"
-
-# 命令将解析并显示：
-# - 任务名称：cc-stat3
-# - 环境：aicc
-# - 参数：env=dev-93, DeliveryModel=BuildAndDeploy 等
-# 然后会提示您输入别名
 ```
 
 **别名重复处理：**
-- 如果别名已存在，会询问是否覆盖
-- 输入 `y` 或 `yes` 覆盖现有命令
-- 输入 `n` 或 `N` 保留现有命令并输入新别名
+
+- 通过 `history add` 保存时若别名已存在，会覆盖原有记录（Pinned
+  标记与 params hash 会被保留）。
+- 自动生成的别名天然唯一，不会冲突。
+
+### 别名模板
+
+默认情况下自动生成的别名形如 `<job>_<8字符hash>`（例如
+`web-rpm-build-manual_a3f9c1b2`），能保证唯一但不易读。在
+`config.yaml` 中设置 `history_alias_template` 即可自定义命名规则：
+
+```yaml
+history_alias_template: "{job}_{param.branch}"
+```
+
+支持的占位符：
+
+| 占位符             | 说明                                                  |
+|--------------------|-------------------------------------------------------|
+| `{job}`            | Jenkins 任务名称                                      |
+| `{env}`            | 当前环境名                                            |
+| `{hash}`           | 参数集合的稳定 8 字符哈希                              |
+| `{param.<name>}`   | `-a <name>=<value>` 中指定参数的值                      |
+
+缺失的参数渲染为空，结果会做字符安全处理（shell 特殊字符与空白替换
+为 `_`，去掉前导 `-`）。若生成的别名与已有记录冲突，`jj` 会自动追
+加 `_2`、`_3` 等后缀。模板为空或渲染结果为空时回退到
+`<job>_<hash>`。
+
+### 自定义别名
+
+`jj run` 支持 `--alias <name>` 参数，覆盖本次调用的自动生成别名：
+
+```bash
+jj run web-rpm-build-manual -a branch=main --alias deploy-prod
+```
+
+别名规则：仅允许字母、数字、`.`、`_`、`-`，长度 ≤ 64，不能以 `-`
+开头。若别名已存在且 (env, job, params) 完全一致，则更新该记录；
+不一致则作为新记录追加。事后改名见下文 `history rename`。
 
 ### 列出已保存的命令
 
@@ -138,6 +209,9 @@ jj history list -a
 jj history list -f json
 jj history list -f yaml
 ```
+
+Pinned 记录会在别名前加 `*` 并加粗显示，便于一眼区分不会被自动淘
+汰的条目。
 
 ### 运行已保存的命令
 
@@ -191,6 +265,29 @@ jj history delete alias1 alias2
 jj history delete -f alias1
 ```
 
+### 标记 / 取消永久保存
+
+历史记录有软上限（默认 `history_limit`，见"配置目录"）。超出上限
+时，`jj` 会按 LRU 淘汰**最久未执行的非 pinned** 记录。被 pinned
+的记录永远不会被自动淘汰：
+
+```bash
+jj history pin <alias>     # 标记为 pinned（豁免淘汰）
+jj history unpin <alias>  # 取消 pinned
+```
+
+重复 pin / unpin 是幂等的。不存在的别名会返回明确错误。
+
+### 重命名别名
+
+```bash
+jj history rename <old-alias> <new-alias>
+```
+
+新别名必须唯一，并满足 `--alias` 同样的字符规则（字母、数字、`.`、
+`_`、`-`；≤ 64；不以 `-` 开头）。Pinned 状态、params hash、累计执
+行次数、最近执行时间等都会保留。
+
 ### 清空所有历史记录
 
 ```bash
@@ -230,6 +327,9 @@ jj history import -m backup.yaml
 - `export` / `exp` / `save` - 导出历史
 - `import` / `imp` / `load` - 导入历史
 - `add` / `a` / `save` - 添加命令到历史
+- `pin` / `p` - 标记为永久保存（豁免淘汰）
+- `unpin` / `unp` - 取消永久保存
+- `rename` / `mv` - 重命名别名
 
 ## 功能特性
 

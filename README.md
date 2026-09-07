@@ -73,6 +73,33 @@ if this does not work for some reason, try following command that might help you
 jj completion check
 ```
 
+### Configuration Location
+
+`jj` stores its configuration under `$XDG_CONFIG_HOME/jj` (default
+`~/.config/jj/`):
+
+```bash
+~/.config/jj/
+├── config.yaml    # configured Jenkins environments + history options
+├── history.yaml   # saved quick commands
+└── cache.<env>    # cached job tree per environment
+```
+
+The first time a newer `jj` starts, it detects the legacy `~/.jj/`
+directory. If a `config.yaml` is found there, a notice is printed and
+the directory is migrated automatically (rename first, fallback to
+copy when the rename crosses filesystems).
+
+History-related knobs live in `config.yaml`:
+
+```yaml
+# Cap of non-pinned quick commands. 0 or negative resets to the default (10).
+history_limit: 10
+
+# Alias template. Empty keeps the default "<job>_<8-char-hash>".
+history_alias_template: "{job}_{param.branch}"
+```
+
 ### Examples
 
 ```bash
@@ -101,23 +128,79 @@ The `jj history` command allows you to save, manage, and quickly rerun frequentl
 
 ### Save Quick Commands
 
-After running a job, you'll be prompted to save the command with an alias. You can also save commands manually:
+Every successful `jj run` is **recorded automatically** — no prompt, no
+manual alias entry. Identical invocations (same environment, job and
+parameters) update the same record by incrementing `Executimes` and
+refreshing `LastExecTime`. Different invocations get a new record with a
+new alias.
+
+```bash
+# 1. Plain run — alias is auto-generated (see Alias Templates) and history is updated
+jj run web-rpm-build-manual -n dev -a branch=main
+
+# 2. Same command again — same alias, Executimes += 1
+jj run web-rpm-build-manual -n dev -a branch=main
+
+# 3. Different branch — a new record, a new alias
+jj run web-rpm-build-manual -n dev -a branch=dev
+```
+
+You can also save a command without running it:
 
 ```bash
 # Manually add a command with alias (interactive)
 jj history add "jj run cc-stat3 -n aicc -a env=dev-93 -a DeliveryModel=BuildAndDeploy"
-
-# The command will parse and display:
-# - Job Name: cc-stat3
-# - Environment: aicc
-# - Parameters: env=dev-93, DeliveryModel=BuildAndDeploy, etc.
-# Then you'll be prompted to enter an alias name
 ```
 
 **Alias Duplicate Handling:**
-- If the alias already exists, you'll be asked whether to overwrite it
-- Enter `y` or `yes` to overwrite the existing command
-- Enter `n` or `N` to keep the existing command and enter a new alias
+
+- If you saved the command with `history add` and the alias is already in
+  use, the existing record is overwritten (Pinned flag and params hash
+  are preserved).
+- Auto-generated aliases are unique by construction, so collisions are
+  not possible there.
+
+### Alias Templates
+
+By default, an auto-generated alias looks like `<job>_<8-char-hash>`
+(e.g. `web-rpm-build-manual_a3f9c1b2`), which is unique but hard to
+read. Set `history_alias_template` in `config.yaml` to control the
+naming:
+
+```yaml
+history_alias_template: "{job}_{param.branch}"
+```
+
+Supported placeholders:
+
+| Placeholder       | Description                                            |
+|-------------------|--------------------------------------------------------|
+| `{job}`           | The Jenkins job name                                   |
+| `{env}`           | The configured environment name                        |
+| `{hash}`          | Stable 8-char hash of the parameter set                |
+| `{param.<name>}`  | Value of the `-a <name>=<value>` argument              |
+
+Missing parameters render as empty strings. The result is
+auto-sanitised: shell-special characters and whitespace become `_`,
+leading dashes are stripped. If the rendered alias collides with an
+existing record, `jj` appends `_2`, `_3`, ... automatically. An empty
+template or one that renders to an empty string falls back to
+`<job>_<hash>`.
+
+### Custom Aliases
+
+Pass `--alias <name>` to `jj run` to override the generated alias for
+that invocation:
+
+```bash
+jj run web-rpm-build-manual -a branch=main --alias deploy-prod
+```
+
+Alias rules: letters, digits, `.`, `_` and `-` only; ≤ 64 characters;
+must not start with `-`. If the alias already exists with the same
+(env, job, params), the record is updated. Otherwise the new alias is
+appended as a separate record. To rename an existing record after the
+fact, see `history rename` below.
 
 ### List Saved Commands
 
@@ -138,6 +221,9 @@ jj history list -a
 jj history list -f json
 jj history list -f yaml
 ```
+
+Pinned records are prefixed with `*` and rendered in bold, so they
+stand out from LRU-eligible records.
 
 ### Run Saved Commands
 
@@ -191,6 +277,31 @@ jj history delete alias1 alias2
 jj history delete -f alias1
 ```
 
+### Pin and Unpin Commands
+
+History has a soft cap (default `history_limit`, see Configuration
+Location). When the cap is exceeded, the **oldest non-pinned** record
+is evicted (LRU). Pin a record to keep it forever:
+
+```bash
+jj history pin <alias>     # Mark as pinned (exempt from eviction)
+jj history unpin <alias>   # Allow it to be evicted again
+```
+
+Pinning or unpinning an already-pinned / already-unpinned record is a
+no-op. An unknown alias returns a clear error.
+
+### Rename a Command
+
+```bash
+jj history rename <old-alias> <new-alias>
+```
+
+The new alias must be unique and follow the same character rules as
+`--alias` (letters, digits, `.`, `_`, `-`; ≤ 64 characters; no leading
+dash). Pinning state, params hash, execution counter and last-executed
+timestamp are preserved.
+
 ### Clear All History
 
 ```bash
@@ -230,6 +341,9 @@ jj history import -m backup.yaml
 - `export` / `exp` / `save` - Export history
 - `import` / `imp` / `load` - Import history
 - `add` / `a` / `save` - Add command to history
+- `pin` / `p` - Pin a command (exempt from eviction)
+- `unpin` / `unp` - Unpin a command
+- `rename` / `mv` - Rename a command's alias
 
 ## Features
 

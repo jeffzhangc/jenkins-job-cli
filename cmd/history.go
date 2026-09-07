@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chzyer/readline"
 	"github.com/gocruncher/jenkins-job-cli/cmd/jj"
 	"github.com/spf13/cobra"
 	"github.com/ttacon/chalk"
@@ -213,6 +212,57 @@ You can run multiple commands by providing multiple aliases.`,
 	}
 	historyImportCmd.Flags().BoolVarP(&forceFlag, "merge", "m", false, "Merge instead of replace")
 	historyCmd.AddCommand(historyImportCmd)
+
+	// ========== history pin 命令 ==========
+	var historyPinCmd = &cobra.Command{
+		Use:     "pin <alias>",
+		Aliases: []string{"p"},
+		Short:   "Pin a quick command so it is never auto-evicted",
+		Long: `Pin a saved quick command by alias so it survives history cleanup.
+Pinned entries are excluded from the configured history limit and are only
+removed via "history delete" or "history clear".`,
+		Args:    cobra.ExactArgs(1),
+		ValidArgsFunction: completeAliases,
+		Run: func(cmd *cobra.Command, args []string) {
+			pinQuickCmd(args[0])
+		},
+	}
+	historyCmd.AddCommand(historyPinCmd)
+
+	// ========== history unpin 命令 ==========
+	var historyUnpinCmd = &cobra.Command{
+		Use:     "unpin <alias>",
+		Aliases: []string{"unp"},
+		Short:   "Unpin a quick command",
+		Long:    `Unpin a previously pinned quick command so it can be auto-evicted again.`,
+		Args:    cobra.ExactArgs(1),
+		ValidArgsFunction: completeAliases,
+		Run: func(cmd *cobra.Command, args []string) {
+			unpinQuickCmd(args[0])
+		},
+	}
+	historyCmd.AddCommand(historyUnpinCmd)
+
+	// ========== history rename 命令 ==========
+	var historyRenameCmd = &cobra.Command{
+		Use:     "rename <old-alias> <new-alias>",
+		Aliases: []string{"mv"},
+		Short:   "Rename a quick command's alias",
+		Long: `Rename a quick command's alias.
+The new alias must be unique and consist of letters, digits, dots, dashes or
+underscores (≤ 64 characters).`,
+		Args: cobra.ExactArgs(2),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 0 {
+				return completeAliases(cmd, args, toComplete)
+			}
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			renameQuickCmd(args[0], args[1])
+		},
+	}
+	historyCmd.AddCommand(historyRenameCmd)
 
 	// ========== history add 命令 ==========
 	var historyAddCmd = &cobra.Command{
@@ -662,6 +712,7 @@ type formattedQuickCmd struct {
 	LastExecUnix int64  `json:"lastExecUnix" yaml:"lastExecUnix"` // 保留原始时间戳
 	Env          string `json:"env" yaml:"env"`
 	LastJobUrl   string `json:"lastJobUrl" yaml:"lastJobUrl"`
+	Pinned       bool   `json:"pinned,omitempty" yaml:"pinned,omitempty"`
 }
 
 // 将 QuickRunCmdDefinition 转换为格式化结构体
@@ -682,6 +733,7 @@ func formatQuickCmd(cmd jj.QuickRunCmdDefinition) formattedQuickCmd {
 		LastExecUnix: cmd.LastExecTime,
 		Env:          cmd.Env,
 		LastJobUrl:   cmd.LastJobUrl,
+		Pinned:       cmd.Pinned,
 	}
 }
 
@@ -771,8 +823,16 @@ func listQuickCmds() {
 			aliasColor = chalk.Yellow
 		}
 
-		fmt.Printf("%-25s %-20s %-15s %-8d %-20s %s\n",
-			aliasColor.Color(cmd.Alias),
+		pinnedMark := "  "
+		aliasText := cmd.Alias
+		if cmd.Pinned {
+			pinnedMark = chalk.Yellow.Color("* ")
+			aliasText = chalk.Bold.TextStyle(aliasText)
+		}
+
+		fmt.Printf("%s%-23s %-20s %-15s %-8d %-20s %s\n",
+			pinnedMark,
+			aliasColor.Color(aliasText),
 			chalk.Cyan.Color(cmd.JobName),
 			chalk.Magenta.Color(cmd.Env),
 			cmd.Executimes,
@@ -787,128 +847,56 @@ func listQuickCmds() {
 }
 
 // 保存快速运行命令到历史记录，并提示用户输入别名
-func askToSaveQuickCmd(cmd, jobName string, jobNum int, env jj.Env) {
-	fmt.Println("\n" + chalk.Cyan.Color("╭─────────────────────────────────────────────╮"))
-	fmt.Println(chalk.Cyan.Color("│ ") + chalk.Bold.TextStyle("Save quick command to history?") + chalk.Cyan.Color("           │"))
-	fmt.Println(chalk.Cyan.Color("│ ") + chalk.Yellow.Color("(y)") + " Yes, save with alias    " + chalk.Yellow.Color("(n)") + " No, skip " + chalk.Cyan.Color(" │"))
-	fmt.Println(chalk.Cyan.Color("╰─────────────────────────────────────────────╯"))
-	fmt.Printf("%s", chalk.Dim.TextStyle("Auto skip in 20 seconds... \n"))
-
-	// 创建带超时的读取器
-	answerChan := make(chan string, 1)
-
-	stdinListener.NewListener()
-	readline.Stdin = stdinListener
-
-	go func() {
-		rl, err := readline.New(fmt.Sprintf("There is active build: %s. Do you want to cancel it [Y/n]:", curSt.name))
-		if err != nil {
-			answerChan <- "n"
-			return
-		}
-		defer rl.Close()
-
-		line, err := rl.Readline()
-		if err != nil {
-			answerChan <- "n"
-			return
-		}
-
-		answerChan <- strings.TrimSpace(strings.ToLower(line))
-	}()
-
-	// 等待用户输入或超时
-	var answer string
-	select {
-	case ans := <-answerChan:
-		answer = ans
-	case <-time.After(20 * time.Second):
-		answer = "n"
-		fmt.Println(chalk.Dim.TextStyle("Timeout, skipping save...\n"))
-	}
-
-	// 处理用户选择
-	switch answer {
-	case "y", "yes":
-		saveQuickCmdWithAlias(cmd, jobName, jobNum, env)
-	case "n", "no", "":
-		fmt.Println(chalk.Dim.TextStyle("Quick command not saved.\n"))
-	default:
-		fmt.Println(chalk.Red.Color("Invalid choice. Quick command not saved.\n"))
-	}
+func askToSaveQuickCmd(cmd, jobName string, jobNum int, env jj.Env, userAlias string) {
+	autoUpsertQuickCmd(cmd, jobName, jobNum, env, userAlias)
 }
 
-func saveQuickCmdWithAlias(cmd, jobName string, jobNum int, env jj.Env) {
-	// 加载现有历史
-	history := jj.GetQuickRunCmdList()
-
-	// 获取用户输入的别名
-	alias := getAliasFromUser(history)
-	if alias == "" {
-		fmt.Println(chalk.Dim.TextStyle("No alias entered, skipping save...\n"))
-		return
-	}
-
-	// 构建 LastJobUrl
+func autoUpsertQuickCmd(cmd, jobName string, jobNum int, env jj.Env, userAlias string) {
 	var lastJobUrl string
 	if jobNum > 0 {
 		lastJobUrl = jj.GetConsoleUrl(env, jobName, jobNum)
 	}
 
-	// 创建命令定义
 	cmdDef := jj.QuickRunCmdDefinition{
-		Alias:        alias,
+		Alias:        userAlias,
 		Cmd:          cmd,
 		JobName:      jobName,
-		Executimes:   1,
-		LastExecTime: time.Now().Unix(),
 		Env:          string(env.Name),
 		LastJobUrl:   lastJobUrl,
+		Executimes:   1,
+		LastExecTime: time.Now().Unix(),
 	}
 
-	// 保存到历史
-	jj.AddQuickRunCmd(cmdDef)
+	jj.UpsertQuickRunCmd(cmdDef)
+	fmt.Println(chalk.Dim.TextStyle(fmt.Sprintf("↳ History updated: %s", cmdDef.Alias)))
 }
 
-func getAliasFromUser(history []jj.QuickRunCmdDefinition) string {
-	historyNames := []string{}
-	for _, item := range history {
-		historyNames = append(historyNames, item.Alias)
+func renameQuickCmd(oldAlias, newAlias string) {
+	if err := jj.RenameQuickRunCmd(oldAlias, newAlias); err != nil {
+		fmt.Println(chalk.Red.Color("Error: ") + err.Error())
+		return
 	}
+	fmt.Printf("%s %s %s %s\n",
+		chalk.Green.Color("✓ Renamed:"),
+		chalk.Bold.TextStyle(oldAlias),
+		chalk.Dim.TextStyle("→"),
+		chalk.Bold.TextStyle(newAlias))
+}
 
-	stdinListener.NewListener()
-	readline.Stdin = stdinListener
-
-	for {
-		rl, err := readline.New(fmt.Sprintf("Enter alias name (press Enter): %s", curSt.name))
-		if err != nil {
-			fmt.Println(chalk.Red.Color("Error creating input reader"))
-			return ""
-		}
-		defer rl.Close()
-
-		alias, err := rl.Readline()
-		if err != nil {
-			fmt.Println(chalk.Dim.TextStyle("Alias input cancelled"))
-			return ""
-		}
-
-		alias = strings.TrimSpace(alias)
-
-		if alias == "" {
-			// 自动生成别名
-			fmt.Println(chalk.Dim.TextStyle("No alias entered, please try again."))
-			continue
-		}
-
-		// 检查别名是否已存在
-		if slices.Contains(historyNames, alias) {
-			fmt.Println(chalk.Red.Color("Error: Alias already exists. Please choose a different one."))
-			continue
-		}
-
-		return alias
+func pinQuickCmd(alias string) {
+	if err := jj.PinQuickRunCmd(alias); err != nil {
+		fmt.Println(chalk.Red.Color("Error: ") + err.Error())
+		return
 	}
+	fmt.Printf("%s %s\n", chalk.Green.Color("✓ Pinned:"), chalk.Bold.TextStyle(alias))
+}
+
+func unpinQuickCmd(alias string) {
+	if err := jj.UnpinQuickRunCmd(alias); err != nil {
+		fmt.Println(chalk.Red.Color("Error: ") + err.Error())
+		return
+	}
+	fmt.Printf("%s %s\n", chalk.Green.Color("✓ Unpinned:"), chalk.Bold.TextStyle(alias))
 }
 
 // 解析命令字符串，提取 jobName, env, 和参数

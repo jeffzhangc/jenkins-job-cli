@@ -55,6 +55,7 @@ var curSt st
 var barMutex sync.Mutex
 var closeCh chan struct{}
 var stdinListener *jjStdin
+var aliasFlag string
 
 func init() {
 	var runCmd = &cobra.Command{
@@ -72,6 +73,7 @@ func init() {
 	inputArgs = arguments{args: make([]string, 0, 20)}
 	runCmd.Flags().StringArrayVarP(&inputArgs.args, "arg", "a", []string{}, "input arguments of a job. Usage: -a key=val")
 	runCmd.Flags().StringVarP(&ENV, "name", "n", "", "current Jenkins env name")
+	runCmd.Flags().StringVar(&aliasFlag, "alias", "", "explicit alias to use when saving the command to history (overrides template/auto)")
 	runCmd.SetUsageTemplate(usageTamplate)
 	rootCmd.AddCommand(runCmd)
 }
@@ -215,7 +217,7 @@ func runJob(name string) int {
 	}
 	fmt.Println(chalk.Green.Color("Done"))
 	stdinListener.Close()
-	printQuickRunJobByID(env, name, number)
+	printQuickRunJobByID(env, name, number, aliasFlag)
 	return number
 }
 
@@ -602,7 +604,7 @@ func check(err error) {
 	}
 }
 
-func printQuickRunJobByID(env jj.Env, jobName string, jobNum int) {
+func printQuickRunJobByID(env jj.Env, jobName string, jobNum int, userAlias string) {
 	if jobNum <= 0 {
 		err, jobInfo := jj.GetJobInfo(env, jobName)
 		if err != nil {
@@ -647,6 +649,6 @@ func printQuickRunJobByID(env jj.Env, jobName string, jobNum int) {
 	quickCmdStr := strings.Join(quickCmd, " ")
 	fmt.Printf("\n\nquick commands jobName:%s, historyJobNum:%d \n%s\n", jobName, jobNum, quickCmdStr)
 	if len(inputArgs.args) == 0 {
-		askToSaveQuickCmd(quickCmdStr, jobName, jobNum, env)
+		askToSaveQuickCmd(quickCmdStr, jobName, jobNum, env, userAlias)
 	}
 }

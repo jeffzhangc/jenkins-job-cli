@@ -2,6 +2,8 @@ package jj
 
 import (
 	"crypto/tls"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +28,7 @@ var Debug = false
 const cacheFile = "cache"
 const configFile = "config.yaml"
 const historyFile = "history.yaml"
+const defaultHistoryLimit = 10
 
 var config Config
 var bundles []*Bundle
@@ -32,9 +37,48 @@ var ErrNoEnv = errors.New("no env")
 var ErrNoJob = errors.New("no job")
 
 func init() {
-	homeDir, _ = os.UserHomeDir()
-	homeDir = homeDir + "/.jj/"
+	home, _ := os.UserHomeDir()
+	newHomeDir := home + "/.config/jj/"
+	oldHomeDir := home + "/.jj/"
+	migrateLegacyConfig(oldHomeDir, newHomeDir)
+	homeDir = newHomeDir
 	initConfig()
+}
+
+// migrateLegacyConfig relocates a legacy config directory into newDir when
+// the legacy location still holds a config file but the new location does
+// not. Rename is attempted first (atomic on the same filesystem) and a
+// copy + RemoveAll is used as a cross-device fallback. The function never
+// blocks startup: failures are reported to stderr and the caller continues
+// with whatever already exists in newDir.
+func migrateLegacyConfig(oldDir, newDir string) {
+	if _, err := os.Stat(oldDir); err != nil {
+		return
+	}
+	if _, err := os.Stat(oldDir + configFile); err != nil {
+		return
+	}
+	if _, err := os.Stat(newDir + configFile); err == nil {
+		fmt.Fprintf(os.Stderr, "warning: legacy config at %s found but %s already exists; leaving both untouched\n", oldDir, newDir+configFile)
+		return
+	}
+	if err := os.MkdirAll(newDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to prepare %s: %v\n", newDir, err)
+		return
+	}
+	if err := os.Rename(oldDir, newDir); err == nil {
+		fmt.Fprintf(os.Stderr, "notice: migrated legacy config from %s to %s\n", oldDir, newDir)
+		return
+	}
+	if err := os.CopyFS(newDir, os.DirFS(oldDir)); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to copy legacy config from %s to %s: %v\n", oldDir, newDir, err)
+		return
+	}
+	if err := os.RemoveAll(oldDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to remove legacy config dir %s: %v\n", oldDir, err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "notice: migrated legacy config from %s to %s\n", oldDir, newDir)
 }
 
 func Init(envName string) Env {
@@ -61,6 +105,13 @@ func (t EType) String() string {
 type Config struct {
 	Use  EName `yaml:"use"`
 	Envs []Env `yaml:"envs"`
+	// HistoryLimit caps how many non-pinned quick commands are retained.
+	// 0 or negative means defaultHistoryLimit (10).
+	HistoryLimit int `yaml:"history_limit"`
+	// HistoryAliasTemplate controls how auto-generated quick command
+	// aliases are produced. Supports {job}, {env}, {hash}, {seq} and
+	// {param.<name>} placeholders. Empty means "<job>_<hash>".
+	HistoryAliasTemplate string `yaml:"history_alias_template"`
 }
 
 type Bundle struct {
@@ -218,18 +269,27 @@ type QuickRunCmdDefinition struct {
 	Alias        string `json:"alias" yaml:"alias"`
 	JobName      string `json:"jobName" yaml:"jobName"`
 	Cmd          string `json:"cmd" yaml:"cmd"`
+	// ParamsHash is a stable digest of the parameter set, used to dedupe
+	// history entries written by automatic command save.
+	ParamsHash string `json:"paramsHash,omitempty" yaml:"paramsHash,omitempty"`
 	Executimes   int    `json:"executimes" yaml:"executimes"`
 	LastExecTime int64  `json:"lastExecTime" yaml:"lastExecTime"`
 	Env          string `json:"env" yaml:"env"`
 	LastJobUrl   string `json:"lastJobUrl" yaml:"lastJobUrl"`
+	// Pinned entries are excluded from automatic eviction.
+	Pinned bool `json:"pinned,omitempty" yaml:"pinned,omitempty"`
 }
 
 func initConfig() {
 	data, err := os.ReadFile(homeDir + configFile)
 	if err != nil {
+		config.HistoryLimit = defaultHistoryLimit
 		return
 	}
 	err = yaml.Unmarshal(data, &config)
+	if config.HistoryLimit <= 0 {
+		config.HistoryLimit = defaultHistoryLimit
+	}
 	changed := false
 	for {
 	Repeat:
@@ -391,23 +451,327 @@ func GetQuickRunCmdList() []QuickRunCmdDefinition {
 
 func AddQuickRunCmd(quickRunCmd QuickRunCmdDefinition) {
 	quickRunCmdList := GetQuickRunCmdList()
-	// check alias 是否有 重复的
+	// alias 重复时覆盖已有条目（保留 pinned 标记与 paramsHash）。
 	for _, cmd := range quickRunCmdList {
 		if cmd.Alias == quickRunCmd.Alias {
-			fmt.Println("alias already exists")
-			// 打印手动保存位置 和 内容
-			fmt.Println("please modify the alias then manually add to " + path.Join(homeDir, historyFile) + " with content:")
-			yaml.NewEncoder(os.Stdout).Encode(quickRunCmd)
+			quickRunCmd.Pinned = cmd.Pinned
+			if quickRunCmd.ParamsHash == "" {
+				quickRunCmd.ParamsHash = cmd.ParamsHash
+			}
+			quickRunCmdList[getIndex(quickRunCmdList, cmd.Alias)] = quickRunCmd
+			SaveAllHistory(applyHistoryLimit(quickRunCmdList))
 			return
 		}
 	}
+	if quickRunCmd.ParamsHash == "" {
+		quickRunCmd.ParamsHash = ComputeParamsHash(quickRunCmd.Cmd)
+	}
+	if quickRunCmd.Alias == "" {
+		quickRunCmd.Alias = generateAlias(quickRunCmd, quickRunCmdList)
+	}
 	quickRunCmdList = append(quickRunCmdList, quickRunCmd)
-	data, err := yaml.Marshal(&quickRunCmdList)
-	if err != nil {
-		fmt.Println("failed to Marshal quickRunCmdList, ", err.Error())
+	SaveAllHistory(applyHistoryLimit(quickRunCmdList))
+}
+
+// UpsertQuickRunCmd inserts or updates a quick command by (Env, JobName,
+// ParamsHash) — the canonical identity of a saved invocation. When the
+// identity matches an existing entry, Executimes/LastExecTime/LastJobUrl
+// are refreshed and the alias/pinned flag preserved. When the identity is
+// new, an alias is generated automatically and the entry is appended. The
+// history limit is enforced after every write so callers do not have to.
+//
+// When the caller's quickRunCmd.Alias is non-empty, that alias is treated as
+// authoritative: the lookup switches to alias-based matching, and the alias
+// is preserved verbatim on the stored entry.
+func UpsertQuickRunCmd(quickRunCmd QuickRunCmdDefinition) {
+	if quickRunCmd.ParamsHash == "" {
+		quickRunCmd.ParamsHash = ComputeParamsHash(quickRunCmd.Cmd)
+	}
+	list := GetQuickRunCmdList()
+
+	// User-provided alias: take precedence over identity-based dedupe.
+	if quickRunCmd.Alias != "" {
+		for i := range list {
+			if list[i].Alias == quickRunCmd.Alias {
+				quickRunCmd.Pinned = list[i].Pinned
+				quickRunCmd.Executimes = list[i].Executimes + 1
+				list[i] = quickRunCmd
+				SaveAllHistory(applyHistoryLimit(list))
+				return
+			}
+		}
+		list = append(list, quickRunCmd)
+		SaveAllHistory(applyHistoryLimit(list))
 		return
 	}
-	os.WriteFile(path.Join(homeDir, historyFile), data, 0644)
+
+	for i := range list {
+		if list[i].Env == quickRunCmd.Env &&
+			list[i].JobName == quickRunCmd.JobName &&
+			list[i].ParamsHash == quickRunCmd.ParamsHash {
+			quickRunCmd.Alias = list[i].Alias
+			quickRunCmd.Pinned = list[i].Pinned
+			quickRunCmd.Executimes = list[i].Executimes + 1
+			list[i] = quickRunCmd
+			SaveAllHistory(applyHistoryLimit(list))
+			return
+		}
+	}
+	if quickRunCmd.Alias == "" {
+		quickRunCmd.Alias = generateAlias(quickRunCmd, list)
+	}
+	list = append(list, quickRunCmd)
+	SaveAllHistory(applyHistoryLimit(list))
+}
+
+// PinQuickRunCmd marks a quick command so it is excluded from automatic
+// eviction. Pinning an already-pinned entry is a no-op.
+func PinQuickRunCmd(alias string) error {
+	list := GetQuickRunCmdList()
+	for i := range list {
+		if list[i].Alias == alias {
+			if list[i].Pinned {
+				return nil
+			}
+			list[i].Pinned = true
+			SaveAllHistory(applyHistoryLimit(list))
+			return nil
+		}
+	}
+	return fmt.Errorf("alias %q not found", alias)
+}
+
+// UnpinQuickRunCmd clears the pinned flag. Unpinning a non-pinned entry
+// is a no-op.
+func UnpinQuickRunCmd(alias string) error {
+	list := GetQuickRunCmdList()
+	for i := range list {
+		if list[i].Alias == alias {
+			if !list[i].Pinned {
+				return nil
+			}
+			list[i].Pinned = false
+			SaveAllHistory(applyHistoryLimit(list))
+			return nil
+		}
+	}
+	return fmt.Errorf("alias %q not found", alias)
+}
+
+// HistoryLimit returns the configured maximum number of non-pinned entries.
+func HistoryLimit() int {
+	if config.HistoryLimit <= 0 {
+		return defaultHistoryLimit
+	}
+	return config.HistoryLimit
+}
+
+// ComputeParamsHash returns a stable digest of the parameter portion of a
+// "jj run" command string. Extracted key=value pairs are sorted so that
+// argument order does not change the hash; jobs and environments are not
+// part of the hash because they are encoded separately in the dedupe key.
+func ComputeParamsHash(cmd string) string {
+	parts := strings.Fields(cmd)
+	pairs := make([]string, 0, len(parts)/2)
+	for i := 0; i < len(parts); i++ {
+		if parts[i] == "-a" && i+1 < len(parts) {
+			pairs = append(pairs, parts[i+1])
+			i++
+		}
+	}
+	sort.Strings(pairs)
+	h := sha256.Sum256([]byte(strings.Join(pairs, "\x00")))
+	return hex.EncodeToString(h[:])[:8]
+}
+
+// generateAlias builds a unique "<jobName>_<hash>" alias that does not
+// collide with any alias already present in history.
+func generateAlias(cmd QuickRunCmdDefinition, history []QuickRunCmdDefinition) string {
+	if cmd.ParamsHash == "" {
+		cmd.ParamsHash = ComputeParamsHash(cmd.Cmd)
+	}
+	used := make(map[string]bool, len(history))
+	for _, c := range history {
+		used[c.Alias] = true
+	}
+	candidate := renderAliasTemplate(cmd)
+	if candidate == "" {
+		candidate = cmd.JobName + "_" + cmd.ParamsHash
+	}
+	if !used[candidate] {
+		return candidate
+	}
+	for i := 2; ; i++ {
+		alt := fmt.Sprintf("%s_%d", candidate, i)
+		if !used[alt] {
+			return alt
+		}
+	}
+}
+
+// RenameQuickRunCmd changes the alias of an existing quick command.
+// It validates the new alias, refuses to clobber an existing entry,
+// and rewrites history.yaml on success.
+func RenameQuickRunCmd(oldAlias, newAlias string) error {
+	if err := ValidateAlias(newAlias); err != nil {
+		return err
+	}
+	list := GetQuickRunCmdList()
+	idxOld := -1
+	for i, c := range list {
+		if c.Alias == oldAlias {
+			idxOld = i
+			continue
+		}
+		if c.Alias == newAlias {
+			return fmt.Errorf("alias %q already exists", newAlias)
+		}
+	}
+	if idxOld < 0 {
+		return fmt.Errorf("alias %q not found", oldAlias)
+	}
+	list[idxOld].Alias = newAlias
+	SaveAllHistory(applyHistoryLimit(list))
+	return nil
+}
+
+// ValidateAlias checks that a user-provided alias is syntactically valid:
+// non-empty, ≤ 64 bytes, no leading dash, and limited to alphanumerics,
+// underscores, dots and hyphens.
+func ValidateAlias(alias string) error {
+	if alias == "" {
+		return fmt.Errorf("alias is empty")
+	}
+	if len(alias) > 64 {
+		return fmt.Errorf("alias too long (max 64 characters)")
+	}
+	if alias[0] == '-' {
+		return fmt.Errorf("alias cannot start with '-'")
+	}
+	for _, r := range alias {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '.' || r == '-':
+		default:
+			return fmt.Errorf("alias contains invalid character %q", r)
+		}
+	}
+	return nil
+}
+
+// SanitizeAlias renders arbitrary text into a CLI-friendly alias by
+// replacing whitespace and shell-special characters with underscores and
+// stripping leading dashes.
+func SanitizeAlias(s string) string {
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '\n', '\r', '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimLeft(b.String(), "-")
+}
+
+// extractParams parses "-a key=value" pairs from a command string and
+// returns them keyed by parameter name.
+func extractParams(cmd string) map[string]string {
+	out := map[string]string{}
+	parts := strings.Fields(cmd)
+	for i := 0; i < len(parts); i++ {
+		if parts[i] == "-a" && i+1 < len(parts) {
+			kv := strings.SplitN(parts[i+1], "=", 2)
+			if len(kv) == 2 {
+				out[kv[0]] = kv[1]
+			}
+			i++
+		}
+	}
+	return out
+}
+
+var aliasTemplateRE = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9_.]*)\}`)
+
+// renderAliasTemplate expands the configured history_alias_template for
+// the given quick command. Supported placeholders: {job}, {env}, {hash},
+// {seq} (always rendered as empty here; the caller adds a numeric suffix
+// on collision) and {param.<name>}. An empty or unset template yields an
+// empty string so the caller can fall back to "<job>_<hash>".
+func renderAliasTemplate(cmd QuickRunCmdDefinition) string {
+	tmpl := config.HistoryAliasTemplate
+	if tmpl == "" {
+		return ""
+	}
+	params := extractParams(cmd.Cmd)
+	return aliasTemplateRE.ReplaceAllStringFunc(tmpl, func(token string) string {
+		key := token[1 : len(token)-1]
+		switch {
+		case key == "job":
+			return SanitizeAlias(cmd.JobName)
+		case key == "env":
+			return SanitizeAlias(cmd.Env)
+		case key == "hash":
+			return cmd.ParamsHash
+		case strings.HasPrefix(key, "param."):
+			return SanitizeAlias(params[key[len("param."):]])
+		case key == "seq":
+			return ""
+		default:
+			return ""
+		}
+	})
+}
+
+// getIndex returns the index of the entry with the given alias, or -1.
+func getIndex(list []QuickRunCmdDefinition, alias string) int {
+	for i := range list {
+		if list[i].Alias == alias {
+			return i
+		}
+	}
+	return -1
+}
+
+// applyHistoryLimit enforces the configured history limit while never
+// dropping pinned entries. Pinned entries are placed first; non-pinned
+// entries are sorted by LastExecTime descending (LRU) and truncated to
+// the remaining capacity.
+func applyHistoryLimit(list []QuickRunCmdDefinition) []QuickRunCmdDefinition {
+	limit := config.HistoryLimit
+	if limit <= 0 {
+		limit = defaultHistoryLimit
+	}
+	if len(list) <= limit {
+		return list
+	}
+	pinned := make([]QuickRunCmdDefinition, 0)
+	nonPinned := make([]QuickRunCmdDefinition, 0, len(list))
+	for _, c := range list {
+		if c.Pinned {
+			pinned = append(pinned, c)
+		} else {
+			nonPinned = append(nonPinned, c)
+		}
+	}
+	if len(pinned) >= limit {
+		return pinned[:limit]
+	}
+	sort.SliceStable(nonPinned, func(i, j int) bool {
+		return nonPinned[i].LastExecTime > nonPinned[j].LastExecTime
+	})
+	nonPinned = nonPinned[:limit-len(pinned)]
+	out := make([]QuickRunCmdDefinition, 0, limit)
+	out = append(out, pinned...)
+	out = append(out, nonPinned...)
+	return out
 }
 
 func SaveAllHistory(history []QuickRunCmdDefinition) {

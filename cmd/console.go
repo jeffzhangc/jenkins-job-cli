@@ -99,7 +99,7 @@ func init() {
 
 			if !runningFlag {
 				inputArgs.args = append(inputArgs.args, "test", "skip save history")
-				printQuickRunJobByID(env, jobName, buildNum)
+				printQuickRunJobByID(env, jobName, buildNum, "")
 			}
 			return nil
 		},
