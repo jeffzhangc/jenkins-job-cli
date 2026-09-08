@@ -33,6 +33,7 @@ var (
 	allFlag          bool
 	formatFlag       string // 输出格式：table, json, yaml
 	exportFormatFlag string // export 命令的格式：json, yaml, csv
+	historyRunOutput string // history run 的 -o：写控制台日志到文件，并跳过交互确认
 )
 
 func init() {
@@ -85,9 +86,12 @@ You can limit the number of results.`,
 		ValidArgsFunction: completeAliases,
 		Short:             "Run saved quick command by alias",
 		Long: `Run saved quick command by alias.
-You can run multiple commands by providing multiple aliases.`,
+You can run multiple commands by providing multiple aliases.
+With -o FILE the console log of every build is appended to FILE and all
+interactive confirmations are skipped (non-interactive mode).`,
 		Example: `  jj history run myjob_quick            # Run single command
-  jj history run alias1 alias2 alias3  # Run multiple commands`,
+  jj history run alias1 alias2 alias3  # Run multiple commands
+  jj history run -o build.log alias1   # Run and write console log to build.log`,
 		Run: func(cmd *cobra.Command, args []string) {
 
 			// 运行指定的命令
@@ -95,6 +99,7 @@ You can run multiple commands by providing multiple aliases.`,
 		},
 	}
 	historyRunCmd.Flags().BoolVarP(&forceFlag, "force", "", false, "Force run without confirmation")
+	historyRunCmd.Flags().StringVarP(&historyRunOutput, "output", "o", "", "write every build's console log to this file (skips interactive confirmations)")
 	historyCmd.AddCommand(historyRunCmd)
 
 	// ========== history view 命令 ==========
@@ -360,7 +365,7 @@ func runQuickCmds(aliases []string) {
 		}
 
 		// 询问是否继续执行找到的命令
-		if !forceFlag {
+		if !forceFlag && historyRunOutput == "" {
 			fmt.Print("\nContinue with found commands? [y/N]: ")
 			reader := bufio.NewReader(os.Stdin)
 			answer, _ := reader.ReadString('\n')
@@ -372,7 +377,7 @@ func runQuickCmds(aliases []string) {
 	}
 
 	// 确认执行
-	if !forceFlag && len(validCmdIndices) > 1 {
+	if !forceFlag && historyRunOutput == "" && len(validCmdIndices) > 1 {
 		fmt.Printf("\n%d commands will be executed:\n", len(validCmdIndices))
 		for _, idx := range validCmdIndices {
 			fmt.Printf("  • %s: %s\n", history[idx].Alias, history[idx].JobName)
@@ -415,6 +420,24 @@ func runQuickCmds(aliases []string) {
 	jj.SaveAllHistory(history)
 }
 
+// extractArgsFromCmd parses "-a key=value" pairs out of a stored command,
+// mirroring jj.ComputeParamsHash which splits on whitespace so argument
+// order and stray whitespace do not matter.
+func extractArgsFromCmd(cmdStr string) map[string]string {
+	out := map[string]string{}
+	parts := strings.Fields(cmdStr)
+	for i := 0; i < len(parts); i++ {
+		if parts[i] == "-a" && i+1 < len(parts) {
+			kv := strings.SplitN(parts[i+1], "=", 2)
+			if len(kv) == 2 {
+				out[kv[0]] = kv[1]
+			}
+			i++
+		}
+	}
+	return out
+}
+
 // 执行单个命令（需要根据你的实际执行逻辑实现）
 // 返回 jobUrl 和 error
 func executeQuickCommand(cmd *jj.QuickRunCmdDefinition) (string, error) {
@@ -438,6 +461,24 @@ func executeQuickCommand(cmd *jj.QuickRunCmdDefinition) (string, error) {
 	}
 
 	// 保存当前的 curSt，以便在执行后获取 jobNum
+
+	// 记录上一次的 inputArgs（runJob 会改写它），执行后恢复，避免影响
+	// 后续 alias 的执行。
+	oldArgs := inputArgs
+	defer func() { inputArgs = oldArgs }()
+
+	if historyRunOutput != "" {
+		// 非交互模式：把 -o 传给 jj run，命令、地址和 console 日志都写入文件。
+		outputFile = historyRunOutput
+		defer func() { outputFile = "" }()
+		jobNum := runJobNoOutput(cmd.JobName, false)
+		if jobNum <= 0 {
+			return "", fmt.Errorf("job '%s' run failed", cmd.JobName)
+		}
+		env := jj.Init(cmd.Env)
+		jobUrl := jj.GetConsoleUrl(env, cmd.JobName, jobNum)
+		return jobUrl, nil
+	}
 
 	jobNum := runJob(cmd.JobName)
 

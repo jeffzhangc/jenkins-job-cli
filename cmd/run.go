@@ -56,6 +56,7 @@ var barMutex sync.Mutex
 var closeCh chan struct{}
 var stdinListener *jjStdin
 var aliasFlag string
+var outputFile string
 
 func init() {
 	var runCmd = &cobra.Command{
@@ -63,6 +64,14 @@ func init() {
 		Aliases: []string{"r"},
 		Short:   "Run the specified jenkins job",
 		Run: func(cmd *cobra.Command, args []string) {
+			if outputFile != "" {
+				// --output forces non-interactive mode. The job (plus any
+				// downstream projects) is run and the file receives the
+				// job URL, complete invocation and the full console log.
+				number := runJobNoOutput(args[0], true)
+				saveOutputRunHistory(jj.Init(ENV), args[0], number)
+				return
+			}
 			runJob(args[0])
 		},
 
@@ -74,6 +83,7 @@ func init() {
 	runCmd.Flags().StringArrayVarP(&inputArgs.args, "arg", "a", []string{}, "input arguments of a job. Usage: -a key=val")
 	runCmd.Flags().StringVarP(&ENV, "name", "n", "", "current Jenkins env name")
 	runCmd.Flags().StringVar(&aliasFlag, "alias", "", "explicit alias to use when saving the command to history (overrides template/auto)")
+	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "write the build console log to this file; when set the run is non-interactive (missing -a params fall back to the job defaults, no prompts)")
 	runCmd.SetUsageTemplate(usageTamplate)
 	rootCmd.AddCommand(runCmd)
 }
@@ -219,6 +229,144 @@ func runJob(name string) int {
 	stdinListener.Close()
 	printQuickRunJobByID(env, name, number, aliasFlag)
 	return number
+}
+
+// runJobNoOutput runs a job non-interactively. Nothing is prompted from
+// stdin: parameters missing from -a fall back to the job's default values
+// (including empty defaults). The output file receives:
+//
+//	<job console URL>
+//	jj run <job> -n <env> -a <k=v> ...   (complete invocation)
+//	<blank line>
+//	<entire console log, fetched after the build finishes>
+//
+// Returns the build number, or -1 when the build fails or the file cannot
+// be written. With truncate=true the file is started fresh (jj run -o);
+// with truncate=false the report is appended (history run -o, multiple
+// aliases share one file).
+func runJobNoOutput(name string, truncate bool) int {
+	env := jj.Init(ENV)
+	err, jobInfo := jj.GetJobInfo(env, name)
+	if err == jj.ErrNoJob {
+		err = fmt.Errorf("job '%s' does not exist", name)
+	}
+	check(err)
+	params := jobInfo.GetParameterDefinitions(env, name)
+
+	query := url.Values{}
+	argPairs := make([]string, 0, len(params))
+	for _, pd := range params {
+		val, err := inputArgs.get(pd.Name)
+		if err != nil {
+			val = pd.DefaultParameterValue.Value
+		}
+		query.Add(pd.Name, val)
+		argPairs = append(argPairs, pd.Name+"="+val)
+	}
+
+	fmt.Printf("Build %s started in the %s environment\n", name, env.Name)
+	err, queueId := jj.Build(env, name, query.Encode())
+	check(err)
+	queueId1, _ := strconv.Atoi(queueId)
+	number := waitForExecutor(env, queueId1)
+	jobUrl := jj.GetConsoleUrl(env, name, number)
+
+	// Complete invocation line, e.g.:
+	//   jj run <job> -n <env> -a <k=v> -a <k=v>
+	invocation := []string{"jj run " + name, "-n", string(env.Name)}
+	for _, kv := range argPairs {
+		invocation = append(invocation, "-a "+kv)
+	}
+	invocationLine := strings.Join(invocation, " ")
+
+	// Console header: job URL, execution time and complete invocation, then
+	// the full console log. Nothing is prompted; the same block is echoed to
+	// stdout.
+	execTime := time.Now().Format("2006-01-02 15:04:05")
+	fmt.Printf("%s\n%s\n%s\n", jobUrl, invocationLine, execTime)
+	fmt.Println()
+
+	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY
+	if truncate {
+		flags = os.O_CREATE | os.O_TRUNC | os.O_WRONLY
+	}
+	f, err := os.OpenFile(outputFile, flags, 0644)
+	if err != nil {
+		fmt.Printf("error: failed to open output file %s: %s\n", outputFile, err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	// Header: job address, execution time and the complete invocation, then
+	// a blank line before the full console log. Multiple builds (history run
+	// with several aliases) are separated in the file by their header.
+	if truncate {
+		fmt.Fprintf(f, "%s\n%s\n%s\n\n", jobUrl, execTime, invocationLine)
+	} else {
+		fmt.Fprintf(f, "\n========== %s #%d ==========\n%s\n%s\n%s\n\n", name, number, jobUrl, execTime, invocationLine)
+	}
+
+	// Wait for the build to finish, then fetch the complete console log at
+	// once (no console streaming).
+	for {
+		curBuild, err := jj.GetBuildInfo(env, name, number)
+		if err == nil && !curBuild.Building {
+			var result string
+			if curBuild.Result == "SUCCESS" {
+				result = "SUCCESS"
+			} else {
+				result = curBuild.Result
+			}
+			fmt.Printf("\nResult: %s\n", result)
+
+			log, err := jj.ConsoleText(env, name, number)
+			if err != nil {
+				fmt.Printf("error: failed to read console log: %s\n", err)
+				if curBuild.Result != "SUCCESS" {
+					return -1
+				}
+				return number
+			}
+			if _, err := f.WriteString(log + "\n"); err != nil {
+				fmt.Printf("error: failed to write output file %s: %s\n", outputFile, err)
+				return -1
+			}
+			if curBuild.Result != "SUCCESS" {
+				return -1
+			}
+			return number
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// saveOutputRunHistory records the -o run as a history entry so the command
+// can later be re-run with "jj history run". number is the build number (or
+// -1 when the run failed); failures are only reported but history is still
+// persisted unless the build itself never produced a number.
+func saveOutputRunHistory(env jj.Env, jobName string, number int) {
+	if number <= 0 {
+		return
+	}
+	cmdLine := []string{"jj run " + jobName, "-n", string(env.Name)}
+	for _, arg := range inputArgs.args {
+		cmdLine = append(cmdLine, "-a "+arg)
+	}
+	cmdStr := strings.Join(cmdLine, " ")
+
+	cmdDef := jj.QuickRunCmdDefinition{
+		Cmd:          cmdStr,
+		JobName:      jobName,
+		Env:          string(env.Name),
+		LastJobUrl:   jj.GetConsoleUrl(env, jobName, number),
+		Executimes:   1,
+		LastExecTime: time.Now().Unix(),
+	}
+	if aliasFlag != "" {
+		cmdDef.Alias = aliasFlag
+	}
+	jj.UpsertQuickRunCmd(cmdDef)
+	fmt.Println(chalk.Dim.TextStyle(fmt.Sprintf("↳ History updated: %s", cmdDef.Alias)))
 }
 
 func waitForExecutor(env jj.Env, queueId int) int {

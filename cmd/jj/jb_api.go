@@ -346,6 +346,20 @@ func Console(env Env, job string, id int, start string) (string, string, error) 
 	return string(rsp), h["X-Text-Size"][0], nil
 }
 
+// ConsoleText returns the entire console log of a completed build as plain
+// text (no HTML escaping, no incremental chunks). Intended for non-interactive
+// output where the full log is fetched after the build finishes.
+func ConsoleText(env Env, job string, id int) (string, error) {
+	code, rsp, _, err := req(env, "GET", "job/"+job+"/"+strconv.Itoa(id)+"/consoleText", []byte{})
+	if err != nil {
+		return "", err
+	}
+	if code != 200 {
+		return "", errors.New("code = " + strconv.Itoa(code))
+	}
+	return string(rsp), nil
+}
+
 func GetQueueInfo(env Env, id int) (error, QueueInfo) {
 	var queueInfo QueueInfo
 	code, rsp, _, err := req(env, "POST", "/queue/item/"+strconv.Itoa(id)+"/api/json", []byte{})
